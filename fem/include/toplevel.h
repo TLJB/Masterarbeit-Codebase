@@ -15,6 +15,7 @@
 #include <deal.II/grid/grid_refinement.h>
 #include <deal.II/grid/tria_accessor.h>
 #include <deal.II/grid/tria_iterator.h>
+#include <deal.II/grid/grid_out.h>
 #include <deal.II/dofs/dof_handler.h>
 #include <deal.II/dofs/dof_accessor.h>
 #include <deal.II/dofs/dof_tools.h>
@@ -27,10 +28,12 @@
 #include <deal.II/base/symmetric_tensor.h>
 #include <fstream>
 #include <iostream>
+#include <assert.h>
 #include "femtime.h"
 #include "small-strain.h"
 #include "pointhistory.h"
 #include "boundaryvalues.h"
+#include <deal.II/fe/fe_interface_values.h>
 
 namespace fem {
 
@@ -108,7 +111,7 @@ namespace fem {
 		
 		// Could be outsourced to a user input function
 		double total_displacement = 0.05;
-				
+
 	};
 
 
@@ -121,10 +124,10 @@ namespace fem {
 	// dof_handler handles the global numbering of degrees of freedom
 	dof_handler (triangulation),
 	// FE_Q<dim>(1) is a lagrangian polynomial of degree 1
-	fe (FE_Q<dim,spacedim>(1), dim),
+	fe (FE_Q<dim,spacedim>(2), dim),
 	// quadrature_formula(2) is a Gauss Formula with 2 q_points in each
 	// direction
-	quadrature_formula(2)
+	quadrature_formula(3)
 	{
 		// Initialise the other objects here
 		Time time;
@@ -141,33 +144,58 @@ namespace fem {
 	template<int dim,int spacedim>
 	void TopLevel<dim,spacedim>::make_grid()
 	{
-	   // create a cube or quadrat depending on dim with edge 
-	   // coordinates 1, -1 	
-	   GridGenerator::hyper_cube (triangulation, -1, 1);
-	   // refine the mesh
-	   triangulation.refine_global (3);
-	   // initialise the internal variables	   	
-	   setup_quadrature_point_history();	
+    assert(dim==2);
+		// create a cube or quadrat depending on dim with edge 
+		// coordinates 1, -1 	
+		// GridGenerator::hyper_cube (triangulation, -1, 1);
+		// refine the mesh
+		// triangulation.refine_global (1);
 
-	   // This section names the different sides of the mesh, so that we
-	   // can assign different boundary condiditons
-	   for (typename Triangulation<dim,spacedim>::active_cell_iterator cell=triangulation.begin_active(); cell !=triangulation.end(); ++cell)
-	   {
-		   for (unsigned int f=0; f < GeometryInfo<dim>::faces_per_cell; ++f)
-		   {
-			   if (cell->face(f)->at_boundary())
-			   {
-				   const Point<dim> face_center = cell->face(f)->center();
-				   
-				   if (face_center[dim-1] == -1)
-					  cell->face(f)->set_boundary_id (1);
-				   else if (face_center[dim-1] == 1)
-					  cell->face(f)->set_boundary_id (2);
-				   else
-					  cell->face(f)->set_boundary_id (0);			  
-			   }
-		   }
-	   }
+    // create two-element mesh
+
+    if (dim == 2) {
+      const std::vector<Point<dim>> vertices = {
+        {-1.0, -1.0}, {1.0, -1.0}, {1.0, 1.0}, {1.0, 3.0}, {-1.0, 3.0}, {-1.0, 1.0}
+      };
+      const std::vector<std::array<int, GeometryInfo<dim>::vertices_per_cell>>
+        cell_vertices = {
+          {0,1,5,2},
+          {5,2,4,3}
+        };
+      const unsigned int n_cells = cell_vertices.size();
+      std::vector<CellData<dim>> cells(n_cells , CellData<dim>());
+      for (unsigned int itercell = 0; itercell < n_cells; ++itercell) {
+        for (unsigned int itervertice = 0; itervertice < cell_vertices[itercell].size(); ++itervertice) {
+          cells[itercell].vertices[itervertice] = cell_vertices[itercell][itervertice];
+        }
+        cells[itercell].material_id = 0;
+      }  
+      triangulation.create_triangulation(vertices,cells,SubCellData());
+    } else if (dim == 3){
+    }
+
+		// initialise the internal variables	   	
+		setup_quadrature_point_history();	
+
+		// This section names the different sides of the mesh, so that we
+		// can assign different boundary condiditons
+		for (typename Triangulation<dim,spacedim>::active_cell_iterator cell=triangulation.begin_active(); cell !=triangulation.end(); ++cell)
+		{
+			for (unsigned int f=0; f < GeometryInfo<dim>::faces_per_cell; ++f)
+			{
+				if (cell->face(f)->at_boundary())
+				{
+					const Point<dim> face_center = cell->face(f)->center();
+					
+					if (face_center[dim-1] == -1)
+						cell->face(f)->set_boundary_id (1);
+					else if (face_center[dim-1] == 3)
+						cell->face(f)->set_boundary_id (2);
+					else
+						cell->face(f)->set_boundary_id (0);			  
+				}
+			}
+		}
 	}
 	
 	
@@ -221,24 +249,24 @@ namespace fem {
 		// is clamped
 		std::map<types::global_dof_index,double> boundary_values;
 		VectorTools::interpolate_boundary_values (dof_handler,
-												  1,
-												  Functions::ZeroFunction<dim>(dim),
-												  boundary_values);
+        1,
+        Functions::ZeroFunction<dim>(dim),
+        boundary_values);
 												  
 		// Here we assigne the BC's calculated in BoundaryValues to
 		// face(2) (the upper side)
 		VectorTools::interpolate_boundary_values (dof_handler,
-												  2,
-												  BoundaryValues<dim>(time.get_timestep(), time.get_no_timesteps(), total_displacement),
-												  boundary_values); 
+        2,
+        BoundaryValues<dim>(time.get_timestep(), time.get_no_timesteps(), total_displacement),
+        boundary_values); 
 		// No boundary values are set for face(0) therefore a zero
 		// force / stress BC is applied
 		
 		// apply the boundary values here
 		MatrixTools::apply_boundary_values (boundary_values,
-											system_matrix,
-											solution,
-											system_rhs);
+        system_matrix,
+        solution,
+        system_rhs);
 											
 		// Save the incremental displacement for the update of 
 		// quadrature point history									
@@ -263,6 +291,7 @@ namespace fem {
 	{
 		// This section creates an output
 		DataOut<dim> data_out;
+		GridOut grid_out;
 		data_out.attach_dof_handler (dof_handler);
 		std::vector<std::string> solution_names;
 		solution_names.emplace_back("x_displacement");
@@ -271,8 +300,10 @@ namespace fem {
 		data_out.build_patches ();
 		
 		// This section determines the format of the output
-		std::ofstream output ("output/solution.vtk");
-		data_out.write_vtk (output);
+		std::ofstream output_vtk ("output/solution.vtk");
+		std::ofstream output_grid ("output/grid.svg");
+		data_out.write_vtk (output_vtk);
+		grid_out.write_svg(triangulation,output_grid);
 
 	}
 
