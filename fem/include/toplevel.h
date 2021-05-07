@@ -11,6 +11,7 @@
 #include <deal.II/lac/solver_cg.h>
 #include <deal.II/lac/precondition.h>
 #include <deal.II/grid/tria.h>
+// #include "tria.h"
 #include <deal.II/grid/grid_generator.h>
 #include <deal.II/grid/grid_refinement.h>
 #include <deal.II/grid/tria_accessor.h>
@@ -29,11 +30,13 @@
 #include <fstream>
 #include <iostream>
 #include <assert.h>
+#include <exception>
 #include "femtime.h"
 #include "small-strain.h"
 #include "pointhistory.h"
 #include "boundaryvalues.h"
 #include <deal.II/fe/fe_interface_values.h>
+#include <deal.II/grid/grid_in.h>
 
 namespace fem {
 
@@ -80,6 +83,9 @@ namespace fem {
 		
 		// Triangulation contains information of the grid
 		// such as the number of active cells and their iterators
+    // check_for_distorted_cells = true necessary for zero volume elements
+    const bool check_for_distorted_cells = true;
+    typename Triangulation<dim,spacedim>::MeshSmoothing smooth_mesh;
 		Triangulation<dim,spacedim>   triangulation;
 		
 		// The DoFHandler distributes the dofs over the grid
@@ -121,6 +127,7 @@ namespace fem {
 	template<int dim, int spacedim>
 	TopLevel<dim,spacedim>::TopLevel()
 		:
+  triangulation(smooth_mesh,check_for_distorted_cells),
 	// dof_handler handles the global numbering of degrees of freedom
 	dof_handler (triangulation),
 	// FE_Q<dim>(1) is a lagrangian polynomial of degree 1
@@ -144,35 +151,39 @@ namespace fem {
 	template<int dim,int spacedim>
 	void TopLevel<dim,spacedim>::make_grid()
 	{
-    assert(dim==2);
-		// create a cube or quadrat depending on dim with edge 
-		// coordinates 1, -1 	
-		// GridGenerator::hyper_cube (triangulation, -1, 1);
-		// refine the mesh
-		// triangulation.refine_global (1);
-
-    // create two-element mesh
-
     if (dim == 2) {
-      const std::vector<Point<dim>> vertices = {
-        {-1.0, -1.0}, {1.0, -1.0}, {1.0, 1.0}, {1.0, 3.0}, {-1.0, 3.0}, {-1.0, 1.0}
-      };
-      const std::vector<std::array<int, GeometryInfo<dim>::vertices_per_cell>>
-        cell_vertices = {
-          {0,1,5,2},
-          {5,2,4,3}
-        };
-      const unsigned int n_cells = cell_vertices.size();
-      std::vector<CellData<dim>> cells(n_cells , CellData<dim>());
-      for (unsigned int itercell = 0; itercell < n_cells; ++itercell) {
-        for (unsigned int itervertice = 0; itervertice < cell_vertices[itercell].size(); ++itervertice) {
-          cells[itercell].vertices[itervertice] = cell_vertices[itercell][itervertice];
-        }
-        cells[itercell].material_id = 0;
-      }  
-      triangulation.create_triangulation(vertices,cells,SubCellData());
+      GridIn<dim> grid_in;
+      grid_in.attach_triangulation(triangulation);
+      std::ifstream input_file("../mesh/mesh_manual-2d.msh");
+      std::cout << input_file.is_open();
+      // exception catch necessary to allow for zero volume elements 
+      // also (check_for_distorted_elements = true)
+      try {
+        grid_in.read_msh(input_file);
+      }
+      catch (std::exception &exc) {
+        // ignore
+        // std::cerr << exc.what();
+      }
+
     } else if (dim == 3){
+      GridIn<dim> grid_in;
+      grid_in.attach_triangulation(triangulation);
+      std::ifstream input_file("../mesh/mesh_manual-3d.msh");
+      // exception catch necessary to allow for zero volume elements 
+      // also (check_for_distorted_elements = true)
+      try {
+        grid_in.read_msh(input_file);
+      }
+      catch (std::exception &exc) {
+        // ignore
+        // std::cerr << exc.what();
+      }
     }
+    std::ofstream out("../output/grid-1.vtk");
+    GridOut       grid_out;
+    grid_out.write_vtk(triangulation, out);
+    std::cout << "Grid written to grid-1.svg" << std::endl;
 
 		// initialise the internal variables	   	
 		setup_quadrature_point_history();	
