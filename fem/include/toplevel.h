@@ -11,7 +11,6 @@
 #include <deal.II/lac/solver_cg.h>
 #include <deal.II/lac/precondition.h>
 #include <deal.II/grid/tria.h>
-// #include "tria.h"
 #include <deal.II/grid/grid_generator.h>
 #include <deal.II/grid/grid_refinement.h>
 #include <deal.II/grid/tria_accessor.h>
@@ -37,6 +36,9 @@
 #include "boundaryvalues.h"
 #include <deal.II/fe/fe_interface_values.h>
 #include <deal.II/grid/grid_in.h>
+
+#include "CustomExceptions.h"
+#include <boost/throw_exception.hpp>
 
 namespace fem {
 
@@ -142,7 +144,7 @@ namespace fem {
 	}
 
 	template <int dim,int spacedim>
-	TopLevel<dim,spacedim>::~TopLevel ()
+	TopLevel<dim,spacedim>::~TopLevel()
 	{
 	dof_handler.clear ();
 	system_matrix.clear();
@@ -155,7 +157,10 @@ namespace fem {
       GridIn<dim> grid_in;
       grid_in.attach_triangulation(triangulation);
       std::ifstream input_file("../mesh/mesh_manual-2d.msh");
-      std::cout << input_file.is_open();
+      if (!input_file.is_open()){
+        cexc::file_read_error exc;
+        BOOST_THROW_EXCEPTION(exc);
+      }
       // exception catch necessary to allow for zero volume elements 
       // also (check_for_distorted_elements = true)
       try {
@@ -170,6 +175,10 @@ namespace fem {
       GridIn<dim> grid_in;
       grid_in.attach_triangulation(triangulation);
       std::ifstream input_file("../mesh/mesh_manual-3d.msh");
+      if (!input_file.is_open()) {
+        cexc::file_read_error exc;
+        BOOST_THROW_EXCEPTION(exc);
+      }
       // exception catch necessary to allow for zero volume elements 
       // also (check_for_distorted_elements = true)
       try {
