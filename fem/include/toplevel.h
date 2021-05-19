@@ -168,7 +168,7 @@ namespace fem {
       }
       catch (std::exception &exc) {
         // ignore
-        // std::cerr << exc.what();
+        std::cerr << boost::diagnostic_information(exc) << std::endl;
       }
 
     } else if (dim == 3){
@@ -209,7 +209,7 @@ namespace fem {
 					
 					if (face_center[dim-1] == -1)
 						cell->face(f)->set_boundary_id (1);
-					else if (face_center[dim-1] == 3)
+					else if (face_center[dim-2] == 3)
 						cell->face(f)->set_boundary_id (2);
 					else
 						cell->face(f)->set_boundary_id (0);			  
@@ -316,14 +316,16 @@ namespace fem {
 		std::vector<std::string> solution_names;
 		solution_names.emplace_back("x_displacement");
 		solution_names.emplace_back("y_displacement");
+		solution_names.emplace_back("z_displacement");
 		data_out.add_data_vector (solution, solution_names);
 		data_out.build_patches ();
 		
 		// This section determines the format of the output
-		std::ofstream output_vtk ("output/solution.vtk");
-		std::ofstream output_grid ("output/grid.svg");
+		std::ofstream output_vtk ("../output/solution.vtk");
+		// std::ofstream output_grid ("../output/grid.svg");
+    // DataOut::VtkFlags
 		data_out.write_vtk (output_vtk);
-		grid_out.write_svg(triangulation,output_grid);
+		// grid_out.write_svg(triangulation,output_grid);
 
 	}
 

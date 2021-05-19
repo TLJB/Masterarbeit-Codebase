@@ -1,5 +1,6 @@
 #include<iostream>
 #include"toplevel.h"
+#include<boost/exception/diagnostic_information.hpp>
 
 int main()
 {
@@ -7,13 +8,14 @@ int main()
 	// This error catch doesn't make all that much sense
 	try 
 	{
-		TopLevel<2,2> test;
+		TopLevel<3,3> test;
 		test.run();
 		std::cout << "test run" << std::endl;
 	}
-	catch (...)
+	catch (std::exception &exc)
 	{
-		std:: cout << "execution failed" << std::endl;
+		std::cerr << "execution failed" << std::endl;
+    std::cerr << boost::diagnostic_information(exc) << std::endl;
 		return 1;
 	}
 		return 0;
