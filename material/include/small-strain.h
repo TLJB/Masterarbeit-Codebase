@@ -10,9 +10,10 @@
 #include"getstrain.h"
 #include"norm.h"
 
-namespace fem{
+namespace SSLinHard{
 
     using namespace dealii;
+    using namespace fem;
 
 	// Material contains all material parameters and solves the local 
 	// System of equations at each quadrature point	

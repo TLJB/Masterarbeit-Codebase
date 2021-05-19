@@ -62,8 +62,8 @@ namespace fem {
 		// with the appropriate sparsity patern	
 		void setup_system();
 		
-		// assemble system calls material.calc_cell_matrix and 
-		// material.calc_cell_rhs and arranges them into the system 
+		// assemble system calls bulk.calc_cell_matrix and 
+		// bulk.calc_cell_rhs and arranges them into the system 
 		// matrix/rhs it also calls the boundary function		
 		void assemble_system();
 		
@@ -103,7 +103,7 @@ namespace fem {
 		Vector<double>	   system_rhs;
 		
 		Time time;
-		Material<dim,spacedim> material;
+		SSLinHard::Material<dim,spacedim> bulk;
 		
 		// A Vector of type PointHistory to save the internal variables 
 		// at each quadrature point
@@ -140,7 +140,7 @@ namespace fem {
 	{
 		// Initialise the other objects here
 		Time time;
-		Material<dim,spacedim> material;	
+		SSLinHard::Material<dim,spacedim> bulk;	
 	}
 
 	template <int dim,int spacedim>
@@ -248,8 +248,8 @@ namespace fem {
 		// loop over cells
 		for (;cell<endc; ++cell)
 		{	
-			cell_matrix = material.calc_cell_matrix(fe,cell,quadrature_formula); 
-			cell_rhs = material.calc_cell_rhs(fe, cell, quadrature_formula);
+			cell_matrix = bulk.calc_cell_matrix(fe,cell,quadrature_formula); 
+			cell_rhs = bulk.calc_cell_rhs(fe, cell, quadrature_formula);
 			
 			// this section arranges the cell matrix/rhs into the global
 			// system of equations
@@ -394,7 +394,7 @@ namespace fem {
 			for (unsigned int q=0; q<quadrature_formula.size(); ++q)
 			{
 				const SymmetricTensor<2,dim> 
-				new_stress = material.calc_stress( (get_strain(displacement_increment_grads[q]) - local_quadrature_points_history[q].strain_pl) );
+				new_stress = bulk.calc_stress( (get_strain(displacement_increment_grads[q]) - local_quadrature_points_history[q].strain_pl) );
 				local_quadrature_points_history[q].old_stress = new_stress;
 			}
 		}
