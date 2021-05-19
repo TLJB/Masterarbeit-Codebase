@@ -1,0 +1,6 @@
+build/*
+misc/*
+.vscode/*
+workspace.code-workspace
+output/*
+bin/*
