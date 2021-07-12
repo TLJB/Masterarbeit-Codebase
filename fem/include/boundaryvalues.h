@@ -1,15 +1,31 @@
+/**
+ * @file boundaryvalues.h
+ * @author Till Budde (tilljanis.budde@tu-dortmund.de)
+ * @brief Implements Boundary Values for the FEM
+ * @version 0.1
+ * @date 2021-06-28
+ * 
+ * @copyright Copyright (c) 2021
+ * 
+ */
 #ifndef BOUNDARVALUES_H
 #define BOUNDARVALUES_H
 
 #include <deal.II/base/function.h>
 #include <deal.II/base/point.h>
 #include <deal.II/lac/vector.h>
+#include "CustomExceptions.h"
 
 
 namespace fem {
 
-    using namespace dealii;
+  using namespace dealii;
 
+	/**
+	 * @brief Class to assign boundary values
+	 * 
+	 * @tparam dim number of dimensions
+	 */
 	template<int dim>
 	class BoundaryValues : public Function<dim>
 	{	
@@ -47,7 +63,13 @@ namespace fem {
 		Assert (values.size() == dim,
 				ExcDimensionMismatch (values.size(), dim));
 		values = 0;
-		values(dim-1) = current_displacement;
+		if ( dim > 1) {
+		values(1) = current_displacement;
+		}
+		else {
+			cexc::exception_base exc;
+			BOOST_THROW_EXCEPTION(exc);
+		}
 	}
 
 	// vector_value_list calls vector_value at each quadrature_point
