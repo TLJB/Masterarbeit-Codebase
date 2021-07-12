@@ -1,3 +1,13 @@
+/**
+ * @file bodyforce.h
+ * @author Till Budde (tilljanis.budde@tu-dortmund.de)
+ * @brief Implements class to apply body forces
+ * @version 0.1
+ * @date 2021-06-28
+ * 
+ * @copyright Copyright (c) 2021
+ * 
+ */
 #ifndef BODYFORCE_H
 #define BODYFORCE_H
 
@@ -7,18 +17,38 @@
 
 namespace fem {
 
-    using namespace dealii;
+  using namespace dealii;
 
-	// The BodyForce class handles bodyforces		
+	/**
+	 * @brief Class to apply body forces
+	 * 
+	 * @tparam dim number of dimensions
+	 */
 	template <int dim>
 	class BodyForce :  public Function<dim>
 	{
 		public:
+		/**
+		 * @brief Construct a new Body Force object
+		 * 
+		 */
 		BodyForce ();
+		/**
+		 * @brief calculates the body force at a  point
+		 * 
+		 * @param p Point
+		 * @param values returns Bodyforce values at point 
+		 */
 		virtual
 		void
 		vector_value (const Point<dim> &p,
 						Vector<double>   &values) const;
+		/**
+		 * @brief calculates the body force for vector of points
+		 * 
+		 * @param points List of points
+		 * @param value_list returns Bodyforces at points
+		 */
 		virtual
 		void
 		vector_value_list (const std::vector<Point<dim> > &points,
@@ -33,7 +63,6 @@ namespace fem {
 	:
 	Function<dim> (dim)
 	{}
-	// body_force.vector_value calculates  the bodyforces	
 	template <int dim>
 	inline
 	void
@@ -49,7 +78,7 @@ namespace fem {
 	}
 	
 	// vector_value_list ditributes the bodyforces by calling 
-	// vector_value at each quadrature_point	
+	// vector_value at each point	
 	template <int dim>
 	void
 	BodyForce<dim>::vector_value_list (const std::vector<Point<dim> > &points,

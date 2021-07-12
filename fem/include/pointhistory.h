@@ -1,3 +1,13 @@
+/**
+ * @file pointhistory.h
+ * @author Till Budde
+ * @brief Implements structure to save state dependent variables at quadrature points
+ * @version 0.1
+ * @date 2021-06-28
+ * 
+ * @copyright Copyright (c) 2021
+ * 
+ */
 #ifndef POINHISTORY_H
 #define POINHISTORY_H
 
@@ -5,8 +15,12 @@
 
 namespace fem {
 
-    using namespace dealii;
-	// PointHistory contains internal variables of the previous timestep
+  using namespace dealii;
+	/**
+	 * @brief Save state dependent variables of quadrature point
+	 * 
+	 * @tparam dim  number of dimensions
+	 */
 	template<int dim>
 	struct PointHistory
 	{
