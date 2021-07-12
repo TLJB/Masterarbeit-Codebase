@@ -17,7 +17,6 @@
 #include<deal.II/base/tensor.h>
 #include"bodyforce.h"
 #include"pointhistory.h"
-#include"getstrain.h"
 
 /**
  * @brief Namespace for small-strain elasticity + linear-hardening
