@@ -4,3 +4,4 @@ misc/*
 workspace.code-workspace
 output/*
 bin/*
+doc/*
