@@ -1,3 +1,13 @@
+/**
+ * @file toplevel.h
+ * @author Till Budde
+ * @brief FEM Code for the masterthesis "Implementation und Analyse generalisierter Kohäsivzonenelemente in die Finite-Elemente- Bibliothek deal.II"
+ * @version 0.1
+ * @date 2021-06-28
+ * 
+ * @copyright Copyright (c) 2021
+ * 
+ */
 #ifndef TOPLEVEL_H
 #define TOPLEVEL_H
 
@@ -9,6 +19,7 @@
 #include <deal.II/lac/sparse_matrix.h>
 #include <deal.II/lac/dynamic_sparsity_pattern.h>
 #include <deal.II/lac/solver_cg.h>
+#include <deal.II/lac/sparse_direct.h>
 #include <deal.II/lac/precondition.h>
 #include <deal.II/grid/tria.h>
 #include <deal.II/grid/grid_generator.h>
@@ -32,6 +43,7 @@
 #include <exception>
 #include "femtime.h"
 #include "small-strain.h"
+#include "LinElaInter.h"
 #include "pointhistory.h"
 #include "boundaryvalues.h"
 #include <deal.II/fe/fe_interface_values.h>
@@ -40,11 +52,20 @@
 #include "CustomExceptions.h"
 #include <boost/throw_exception.hpp>
 
+/**
+ * @brief Namespace for the FEM Simulation
+ * 
+ */
 namespace fem {
 
     using namespace dealii;
 
-	// The TopLevel controlls the fem simulation	
+	/**
+	 * @brief TopLevel implements the FEM Simultion, including meshing, assembly and solving
+	 * 
+	 * @tparam dim Number of Dimensions 
+	 * @tparam spacedim of spatial dimensions
+	 */
 	template<int dim, int spacedim>
 	class TopLevel
 	{
@@ -54,70 +75,140 @@ namespace fem {
 		void run ();
 		
 		private:
-		// Make grid creates the grid		
+		/**
+		 * @brief create / read the grid
+		 * 
+		 */
 		void make_grid();
 		
 		// setup system distributes the dofs over the grid and 
 		// intialises the system matrix/right-hand-side(rhs)/solution
 		// with the appropriate sparsity patern	
+		/**
+		 * @brief distributes dofs, initialise global matrix, vectors
+		 * 
+		 */
 		void setup_system();
 		
-		// assemble system calls bulk.calc_cell_matrix and 
-		// bulk.calc_cell_rhs and arranges them into the system 
-		// matrix/rhs it also calls the boundary function		
+		/**
+		 * @brief call material routines and sort into global system of equations
+		 * 
+		 */
 		void assemble_system();
 		
-		//	solves the system build by assemble system	
+		/**
+		 * @brief Solve the global system of equations
+		 * 
+		 */
 		void solve();
 				
 		void output_results();
 		
-		// setup_quadrature_point _history sets up the internal 
-		// variables at each quadrature point - in this programms all
-		// are initialized as zero		
+		/**
+		 * @brief Set the up quadrature point history object / initialise sdv's
+		 * 
+		 */
 		void setup_quadrature_point_history();	
 		
-		// updates quadrature points after the timestep has been solved 		
+		/**
+		 * @brief update state dependent variables
+		 * 
+		 */
 		void update_quadrature_point_history();
 		
+		/**
+		 * @brief Do the initial timestep
+		 * 
+		 */
 		void do_initial_timestep();
+		/**
+		 * @brief do timestep
+		 * 
+		 */
 		void do_timestep();
 		
-		// Triangulation contains information of the grid
-		// such as the number of active cells and their iterators
     // check_for_distorted_cells = true necessary for zero volume elements
-    const bool check_for_distorted_cells = true;
+    const bool check_for_distorted_cells = false;
     typename Triangulation<dim,spacedim>::MeshSmoothing smooth_mesh;
+		/**
+		 * @brief Contains information about the grid
+		 * 
+		 */
 		Triangulation<dim,spacedim>   triangulation;
 		
-		// The DoFHandler distributes the dofs over the grid
+		/**
+		 * @brief Distributes Dofs over grid
+		 * 
+		 */
 		DoFHandler<dim,spacedim>	  dof_handler;
 		
 		// FESystem contains the basic information of the finite element 
 		// system such as the type of interpolation used
+		/**
+		 * @brief contains information about the fe-system such as type of interpolation etc.
+		 * 
+		 */
 		FESystem<dim,spacedim>		fe;
 		
+		/**
+		 * @brief global stiffness matrix
+		 * 
+		 */
 		SparseMatrix<double> system_matrix;
+		/**
+		 * @brief sparsity pattern of the stiffness matrix
+		 * 
+		 */
 		SparsityPattern		 sparsity_pattern;
+		/**
+		 * @brief global displacement field
+		 * 
+		 */
 		Vector<double>	   solution;
+		/**
+		 * @brief right-hand-side vector of SoE (fint,fvole,fdyn etc.)
+		 * 
+		 */
 		Vector<double>	   system_rhs;
 		
+		/**
+		 * @brief Time object implements total-time, dt number of steps etc.
+		 * 
+		 */
 		Time time;
-		SSLinHard::Material<dim,spacedim> bulk;
+		/**
+		 * @brief Bulk material model (Small-Strain Linear elasticity)
+		 * 
+		 */
+		SSLinEla::Material<dim,spacedim> bulk;
+		/**
+		 * @brief Interface material model (linear spring)
+		 * 
+		 */
+		LinElaInter::Material<dim,spacedim> inter;
 		
-		// A Vector of type PointHistory to save the internal variables 
-		// at each quadrature point
+		/**
+		 * @brief state dependent variables at quadrature points
+		 * 
+		 */
 		std::vector<PointHistory<dim>> quadrature_point_history;
 		
-		// incremental displacement saves the solution of the 
-		// displacement field during each step for further use in
-		// update_quadrature_point_history
+		/**
+		 * @brief solution / displacement field of timestep
+		 * 
+		 */
 		Vector<double> incremental_displacement;
 		
-		// QGauss is a class for gauss type integration
+		/**
+		 * @brief type of gauss quadrature used
+		 * 
+		 */
 		QGauss<dim>  quadrature_formula;
 		
-		// Could be outsourced to a user input function
+		/**
+		 * @brief max displacement (reached through linear loadcurve)
+		 * 
+		 */
 		double total_displacement = 0.05;
 
 	};
@@ -129,18 +220,19 @@ namespace fem {
 	template<int dim, int spacedim>
 	TopLevel<dim,spacedim>::TopLevel()
 		:
-  triangulation(smooth_mesh,check_for_distorted_cells),
+  triangulation(smooth_mesh, check_for_distorted_cells),
 	// dof_handler handles the global numbering of degrees of freedom
 	dof_handler (triangulation),
 	// FE_Q<dim>(1) is a lagrangian polynomial of degree 1
-	fe (FE_Q<dim,spacedim>(2), dim),
+	fe (FE_Q<dim,spacedim>(1), dim),
 	// quadrature_formula(2) is a Gauss Formula with 2 q_points in each
 	// direction
-	quadrature_formula(3)
+	quadrature_formula(2)
 	{
 		// Initialise the other objects here
 		Time time;
-		SSLinHard::Material<dim,spacedim> bulk;	
+		SSLinEla::Material<dim,spacedim> bulk;	
+		LinElaInter::Material<dim,spacedim> inter;	
 	}
 
 	template <int dim,int spacedim>
@@ -174,7 +266,7 @@ namespace fem {
     } else if (dim == 3){
       GridIn<dim> grid_in;
       grid_in.attach_triangulation(triangulation);
-      std::ifstream input_file("../mesh/mesh_manual-3d.msh");
+      std::ifstream input_file("../mesh/mesh_manual-3d-noI.msh");
       if (!input_file.is_open()) {
         cexc::file_read_error exc;
         BOOST_THROW_EXCEPTION(exc);
@@ -189,13 +281,23 @@ namespace fem {
         // std::cerr << exc.what();
       }
     }
+    // triangulation.refine_global(5);
+    try {
     std::ofstream out("../output/grid-1.vtk");
+    if (!out.is_open()) {
+      cexc::file_read_error exc;
+      BOOST_THROW_EXCEPTION(exc);
+    }
     GridOut       grid_out;
     grid_out.write_vtk(triangulation, out);
     std::cout << "Grid written to grid-1.svg" << std::endl;
+    }
+    catch (std::exception &exc) {
+      std::cerr << boost::diagnostic_information(exc) << std::endl;
+    }
 
 		// initialise the internal variables	   	
-		setup_quadrature_point_history();	
+		// setup_quadrature_point_history();	
 
 		// This section names the different sides of the mesh, so that we
 		// can assign different boundary condiditons
@@ -207,12 +309,27 @@ namespace fem {
 				{
 					const Point<dim> face_center = cell->face(f)->center();
 					
-					if (face_center[dim-1] == -1)
-						cell->face(f)->set_boundary_id (1);
-					else if (face_center[dim-2] == 3)
-						cell->face(f)->set_boundary_id (2);
-					else
-						cell->face(f)->set_boundary_id (0);			  
+					if (dim==2) {
+						if (face_center[1] == -1)
+							cell->face(f)->set_boundary_id (1);
+						else if (face_center[1] == 3)
+							cell->face(f)->set_boundary_id (2);
+						else if (face_center[0] == -1)
+							cell->face(f)->set_boundary_id (3);
+						else
+							cell->face(f)->set_boundary_id (0);			  
+					} else if (dim==3) {
+							if (face_center[1] == -1)
+								cell->face(f)->set_boundary_id (1);
+							else if (face_center[1] == 3)
+								cell->face(f)->set_boundary_id (2);
+							else if (face_center[0] == -1)
+								cell->face(f)->set_boundary_id (3);
+							else if (face_center[2] == -1)
+									cell->face(f)->set_boundary_id(4);
+							else
+								cell->face(f)->set_boundary_id (0);			  
+					}
 				}
 			}
 		}
@@ -237,6 +354,10 @@ namespace fem {
 	template<int dim, int spacedim>
 	void TopLevel<dim,spacedim>::assemble_system()
 	{
+
+		system_matrix.reinit(sparsity_pattern);
+		system_rhs.reinit(dof_handler.n_dofs());
+
 		const unsigned int  dofs_per_cell = fe.dofs_per_cell;
 		FullMatrix<double>  cell_matrix(dofs_per_cell,dofs_per_cell);
 		Vector<double>		cell_rhs(dofs_per_cell);
@@ -248,12 +369,26 @@ namespace fem {
 		// loop over cells
 		for (;cell<endc; ++cell)
 		{	
-			cell_matrix = bulk.calc_cell_matrix(fe,cell,quadrature_formula); 
-			cell_rhs = bulk.calc_cell_rhs(fe, cell, quadrature_formula);
-			
+			cell->get_dof_indices (local_dof_indices);
+      Vector<double> Ue(dofs_per_cell); 
+			for (unsigned int i=0; i<dofs_per_cell; ++i){
+        Ue[i] = solution(local_dof_indices[i]);
+      }
+      if (cell->material_id() == 1) {
+        cell_matrix = bulk.calc_cell_matrix(fe,cell,quadrature_formula,Ue); 
+        cell_rhs = bulk.calc_cell_rhs(fe, cell, quadrature_formula,Ue);
+      }
+      else if (cell->material_id() == 2) {
+        cell_matrix = inter.calc_cell_matrix(fe,cell,quadrature_formula,Ue); 
+        cell_rhs = inter.calc_cell_rhs(fe, cell, quadrature_formula,Ue);
+      }
+      else {
+        cexc::not_mat_error exc;
+        BOOST_THROW_EXCEPTION(exc);
+      }
+
 			// this section arranges the cell matrix/rhs into the global
 			// system of equations
-			cell->get_dof_indices (local_dof_indices);
 			for (unsigned int i=0; i<dofs_per_cell; ++i)
 			{
 				for (unsigned int j=0; j<dofs_per_cell; ++j)
@@ -261,24 +396,50 @@ namespace fem {
 					system_matrix.add (local_dof_indices[i],
 										local_dof_indices[j],
 										cell_matrix(i,j));
-					system_rhs(local_dof_indices[i]) += cell_rhs(i);
 				}			
+				system_rhs(local_dof_indices[i]) += cell_rhs(i);
 			}
 		} 
 		// Here the vertical displacement of face(1) (the lower end)
 		// is clamped
-		std::map<types::global_dof_index,double> boundary_values;
-		VectorTools::interpolate_boundary_values (dof_handler,
-        1,
-        Functions::ZeroFunction<dim>(dim),
-        boundary_values);
+		std::vector<bool> xmask,ymask,zmask;
+		if (dim==2) {
+			ymask = std::vector<bool>{false,true}, xmask=std::vector<bool>{true,false};
+		} else if (dim==3) {
+			xmask=std::vector<bool>{true,false,false}, ymask=std::vector<bool>{false,true,false}, zmask=std::vector<bool>{false,false,true};
+		}
+			std::map<types::global_dof_index,double> boundary_values;
+			VectorTools::interpolate_boundary_values (dof_handler,
+					1,
+					Functions::ZeroFunction<dim>(dim),
+					boundary_values,
+					ComponentMask(ymask)
+					);
+			// Here we assigne the BC's calculated in BoundaryValues to
+			// face(2) (the upper side)
+			VectorTools::interpolate_boundary_values (dof_handler,
+					2,
+					BoundaryValues<dim>(time.get_timestep(), time.get_no_timesteps(), total_displacement),
+					boundary_values,
+					ComponentMask(ymask)
+					); 
+
+			VectorTools::interpolate_boundary_values (dof_handler,
+					3,
+					Functions::ZeroFunction<dim>(dim),
+					boundary_values,
+					ComponentMask(xmask)
+					);
+
+			if (dim == 3) {
+				VectorTools::interpolate_boundary_values (dof_handler,
+						4,
+						Functions::ZeroFunction<dim>(dim),
+						boundary_values,
+						ComponentMask(zmask)
+						);
+			}
 												  
-		// Here we assigne the BC's calculated in BoundaryValues to
-		// face(2) (the upper side)
-		VectorTools::interpolate_boundary_values (dof_handler,
-        2,
-        BoundaryValues<dim>(time.get_timestep(), time.get_no_timesteps(), total_displacement),
-        boundary_values); 
 		// No boundary values are set for face(0) therefore a zero
 		// force / stress BC is applied
 		
@@ -297,13 +458,10 @@ namespace fem {
 	template<int dim, int spacedim>
 	void TopLevel<dim,spacedim>::solve()
 	{
-		// Max number of iterations is 1000, the tolerance is 1e-12
-		SolverControl		   solver_control (1000, 1e-12);
-		// Use a conjugated gradient solver
-		SolverCG<>			  cg (solver_control);
-		// No preconditioner is used here
-		cg.solve (system_matrix, solution, system_rhs,
-					PreconditionIdentity());	
+		SparseDirectUMFPACK solver;
+		auto tmp = system_rhs;
+		solver.solve(system_matrix,tmp);
+		solution = tmp;
 	}
 	
 	template <int dim, int spacedim>
@@ -313,15 +471,33 @@ namespace fem {
 		DataOut<dim> data_out;
 		GridOut grid_out;
 		data_out.attach_dof_handler (dof_handler);
-		std::vector<std::string> solution_names;
+		std::vector<std::string> solution_names,f_names;
 		solution_names.emplace_back("x_displacement");
 		solution_names.emplace_back("y_displacement");
+		f_names.emplace_back("f_x");
+		f_names.emplace_back("f_y");
+    if (dim == 3) {
 		solution_names.emplace_back("z_displacement");
+		f_names.emplace_back("f_z");
+    };
 		data_out.add_data_vector (solution, solution_names);
+		data_out.add_data_vector(system_rhs,f_names);
 		data_out.build_patches ();
 		
 		// This section determines the format of the output
-		std::ofstream output_vtk ("../output/solution.vtk");
+		std::string filename = "../output/solution_";
+		std::string timestep = std::to_string(time.get_timestep());
+		int prec_zeros = 4 - timestep.length();
+		for (auto i=0 ; i<prec_zeros; ++i){
+			filename += "0";
+		}
+		filename += timestep + ".vtk";
+		std::ofstream output_vtk (filename);
+		if (!output_vtk.is_open()) {
+        cexc::file_error exc;
+        BOOST_THROW_EXCEPTION(exc);
+		}
+			
 		// std::ofstream output_grid ("../output/grid.svg");
     // DataOut::VtkFlags
 		data_out.write_vtk (output_vtk);
@@ -393,9 +569,9 @@ namespace fem {
 			
 			for (unsigned int q=0; q<quadrature_formula.size(); ++q)
 			{
-				const SymmetricTensor<2,dim> 
-				new_stress = bulk.calc_stress( (get_strain(displacement_increment_grads[q]) - local_quadrature_points_history[q].strain_pl) );
-				local_quadrature_points_history[q].old_stress = new_stress;
+				// const SymmetricTensor<2,dim> 
+				// new_stress = bulk.calc_stress( (get_strain(displacement_increment_grads[q]) - local_quadrature_points_history[q].strain_pl) );
+				// local_quadrature_points_history[q].old_stress = new_stress;
 			}
 		}
 	}
@@ -410,6 +586,7 @@ namespace fem {
 		assemble_system();
 		solve();
 		std::cout << "initial step completed" << std::endl;
+		output_results(); 
 	}
 	
 	template<int dim,int spacedim>
@@ -417,10 +594,24 @@ namespace fem {
 	{
 		time.increment();
 		std::cout << "Timestep No. " << time.get_timestep() << " time " << time.get_current() << std::endl;
-		assemble_system();
-		solve();
+		double rsn = 1.;
+		unsigned int iter = 0;
+		while (rsn > 1e-8) {
+			assemble_system();
+			solve();
+			Vector<double> rsd(dof_handler.n_dofs());
+			system_matrix.vmult(rsd,solution);
+			rsd.add(-1,system_rhs);
+			rsn = rsd.l2_norm();
+			iter++;
+			if (iter > 15) {
+        cexc::convergence_error exc;
+        BOOST_THROW_EXCEPTION(exc);
+			}
+		}
 		std::cout << "Step completed" << std::endl;
-		update_quadrature_point_history();
+		// update_quadrature_point_history();
+		output_results(); 
 	}
 	   
 	template<int dim, int spacedim>
@@ -431,7 +622,7 @@ namespace fem {
 		 {
 			do_timestep();
 		 }			
-		 output_results(); 
+		//  output_results(); 
 		 std::cout << "output results" << std::endl;
 	 }
 	 
