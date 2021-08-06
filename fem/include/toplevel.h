@@ -36,6 +36,7 @@
 #include <deal.II/numerics/data_out.h>
 #include <deal.II/fe/fe_system.h>
 #include <deal.II/fe/fe_q.h>
+#include <deal.II/fe/fe_face.h>
 #include <deal.II/base/symmetric_tensor.h>
 #include <fstream>
 #include <iostream>
@@ -148,7 +149,8 @@ namespace fem {
 		 * @brief contains information about the fe-system such as type of interpolation etc.
 		 * 
 		 */
-		FESystem<dim,spacedim>		fe;
+		FESystem<dim,spacedim>		fe_bulk;
+		FESystem<dim,spacedim>		fe_inter;
 		
 		/**
 		 * @brief global stiffness matrix
@@ -203,7 +205,9 @@ namespace fem {
 		 * @brief type of gauss quadrature used
 		 * 
 		 */
-		QGauss<dim>  quadrature_formula;
+		QGauss<dim>  quadrature_formula_bulk;
+
+		QGauss<dim-1>  quadrature_formula_inter;
 		
 		/**
 		 * @brief max displacement (reached through linear loadcurve)
@@ -224,10 +228,12 @@ namespace fem {
 	// dof_handler handles the global numbering of degrees of freedom
 	dof_handler (triangulation),
 	// FE_Q<dim>(1) is a lagrangian polynomial of degree 1
-	fe (FE_Q<dim,spacedim>(1), dim),
+	fe_bulk (FE_Q<dim,spacedim>(1), dim),
+	fe_inter (FE_FaceQ<dim,spacedim>(1),dim),
 	// quadrature_formula(2) is a Gauss Formula with 2 q_points in each
 	// direction
-	quadrature_formula(2)
+	quadrature_formula_bulk(2),
+	quadrature_formula_inter(2)
 	{
 		// Initialise the other objects here
 		Time time;
@@ -266,7 +272,7 @@ namespace fem {
     } else if (dim == 3){
       GridIn<dim> grid_in;
       grid_in.attach_triangulation(triangulation);
-      std::ifstream input_file("../mesh/mesh_manual-3d-noI.msh");
+      std::ifstream input_file("../mesh/mesh_manual-3d.msh");
       if (!input_file.is_open()) {
         cexc::file_read_error exc;
         BOOST_THROW_EXCEPTION(exc);
@@ -339,7 +345,7 @@ namespace fem {
 	template <int dim,int spacedim>
 	void TopLevel<dim,spacedim>::setup_system ()
 	{
-		dof_handler.distribute_dofs (fe);
+		dof_handler.distribute_dofs (fe_bulk);
 		// use knowledge of the distribution of the dofs to create a 
 		// sparsitiy pattern fo the system of equations
 		DynamicSparsityPattern dsp(dof_handler.n_dofs(), dof_handler.n_dofs());
@@ -358,7 +364,7 @@ namespace fem {
 		system_matrix.reinit(sparsity_pattern);
 		system_rhs.reinit(dof_handler.n_dofs());
 
-		const unsigned int  dofs_per_cell = fe.dofs_per_cell;
+		const unsigned int  dofs_per_cell = fe_bulk.dofs_per_cell;
 		FullMatrix<double>  cell_matrix(dofs_per_cell,dofs_per_cell);
 		Vector<double>		cell_rhs(dofs_per_cell);
 		std::vector<types::global_dof_index> local_dof_indices (dofs_per_cell);
@@ -375,12 +381,12 @@ namespace fem {
         Ue[i] = solution(local_dof_indices[i]);
       }
       if (cell->material_id() == 1) {
-        cell_matrix = bulk.calc_cell_matrix(fe,cell,quadrature_formula,Ue); 
-        cell_rhs = bulk.calc_cell_rhs(fe, cell, quadrature_formula,Ue);
+        cell_matrix = bulk.calc_cell_matrix(fe_bulk,cell,quadrature_formula_bulk,Ue); 
+        cell_rhs = bulk.calc_cell_rhs(fe_bulk, cell, quadrature_formula_bulk,Ue);
       }
       else if (cell->material_id() == 2) {
-        cell_matrix = inter.calc_cell_matrix(fe,cell,quadrature_formula,Ue); 
-        cell_rhs = inter.calc_cell_rhs(fe, cell, quadrature_formula,Ue);
+        cell_rhs = inter.calc_cell_rhs(fe_inter, cell, quadrature_formula_inter,Ue);
+        cell_matrix = inter.calc_cell_matrix(fe_inter,cell,quadrature_formula_inter,Ue); 
       }
       else {
         cexc::not_mat_error exc;
@@ -521,7 +527,7 @@ namespace fem {
 		std::vector<PointHistory<dim> > tmp;
 		tmp.swap (quadrature_point_history);
 
-		quadrature_point_history.resize(ncell*quadrature_formula.size());
+		quadrature_point_history.resize(ncell*quadrature_formula_bulk.size());
 		
 		// This section the quadratrue_point_history to the quadrature 
 		// points of each cell	
@@ -531,7 +537,7 @@ namespace fem {
 			cell != triangulation.end(); ++cell)
 		{			
 			cell->set_user_pointer (&quadrature_point_history[history_index]);
-			history_index += quadrature_formula.size();
+			history_index += quadrature_formula_bulk.size();
 		}
 		Assert (history_index == quadrature_point_history.size(),ExcInternalError());			
 	}
@@ -544,10 +550,10 @@ namespace fem {
 	void TopLevel<dim,spacedim>::update_quadrature_point_history()
 	{
 		
-		FEValues<dim,spacedim> fe_values (fe, quadrature_formula,
+		FEValues<dim,spacedim> fe_values (fe_bulk, quadrature_formula_bulk,
 								update_values | update_gradients);
 		std::vector<std::vector<Tensor<1,dim>>>
-		displacement_increment_grads (quadrature_formula.size(), 
+		displacement_increment_grads (quadrature_formula_bulk.size(), 
 									std::vector<Tensor<1,dim>>(dim));
 		// loop over cells							
 		for (typename DoFHandler<dim,spacedim>::active_cell_iterator
@@ -567,7 +573,7 @@ namespace fem {
 			fe_values.get_function_gradients (incremental_displacement,
 											  displacement_increment_grads);
 			
-			for (unsigned int q=0; q<quadrature_formula.size(); ++q)
+			for (unsigned int q=0; q<quadrature_formula_bulk.size(); ++q)
 			{
 				// const SymmetricTensor<2,dim> 
 				// new_stress = bulk.calc_stress( (get_strain(displacement_increment_grads[q]) - local_quadrature_points_history[q].strain_pl) );
