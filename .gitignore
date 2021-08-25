@@ -1,7 +1,8 @@
 build/*
 misc/*
 .vscode/*
-workspace.code-workspace
+*.code-workspace
 output/*
 bin/*
 doc/*
+notes/*
