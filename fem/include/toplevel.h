@@ -42,6 +42,7 @@
 #include <iostream>
 #include <assert.h>
 #include <exception>
+#include<vector>
 #include "femtime.h"
 #include "small-strain.h"
 #include "LinElaInter.h"
@@ -49,6 +50,7 @@
 #include "boundaryvalues.h"
 #include <deal.II/fe/fe_interface_values.h>
 #include <deal.II/grid/grid_in.h>
+#include <deal.II/numerics/data_out_dof_data.h>
 
 #include "CustomExceptions.h"
 #include <boost/throw_exception.hpp>
@@ -167,6 +169,7 @@ namespace fem {
 		 * 
 		 */
 		Vector<double>	   solution;
+		Vector<double>	   solution_update;
 		/**
 		 * @brief right-hand-side vector of SoE (fint,fvole,fdyn etc.)
 		 * 
@@ -288,19 +291,19 @@ namespace fem {
       }
     }
     // triangulation.refine_global(5);
-    try {
-    std::ofstream out("../output/grid-1.vtk");
-    if (!out.is_open()) {
-      cexc::file_read_error exc;
-      BOOST_THROW_EXCEPTION(exc);
-    }
-    GridOut       grid_out;
-    grid_out.write_vtk(triangulation, out);
-    std::cout << "Grid written to grid-1.svg" << std::endl;
-    }
-    catch (std::exception &exc) {
-      std::cerr << boost::diagnostic_information(exc) << std::endl;
-    }
+    // try {
+    // std::ofstream out("../output/grid-1.vtk");
+    // if (!out.is_open()) {
+    //   cexc::file_read_error exc;
+    //   BOOST_THROW_EXCEPTION(exc);
+    // }
+    // GridOut       grid_out;
+    // grid_out.write_vtk(triangulation, out);
+    // std::cout << "Grid written to grid-1.svg" << std::endl;
+    // }
+    // catch (std::exception &exc) {
+    //   std::cerr << boost::diagnostic_information(exc) << std::endl;
+    // }
 
 		// initialise the internal variables	   	
 		// setup_quadrature_point_history();	
@@ -363,6 +366,7 @@ namespace fem {
 
 		system_matrix.reinit(sparsity_pattern);
 		system_rhs.reinit(dof_handler.n_dofs());
+		solution.reinit(dof_handler.n_dofs());
 
 		const unsigned int  dofs_per_cell = fe_bulk.dofs_per_cell;
 		FullMatrix<double>  cell_matrix(dofs_per_cell,dofs_per_cell);
@@ -465,9 +469,9 @@ namespace fem {
 	void TopLevel<dim,spacedim>::solve()
 	{
 		SparseDirectUMFPACK solver;
-		auto tmp = system_rhs;
-		solver.solve(system_matrix,tmp);
-		solution = tmp;
+		solver.initialize(system_matrix);
+		// solver.factorize(system_matrix);
+		solver.vmult(solution,system_rhs);
 	}
 	
 	template <int dim, int spacedim>
@@ -475,20 +479,17 @@ namespace fem {
 	{
 		// This section creates an output
 		DataOut<dim> data_out;
-		GridOut grid_out;
+		// data_out.set_flags(write_higher_order_elements=false);
 		data_out.attach_dof_handler (dof_handler);
-		std::vector<std::string> solution_names,f_names;
-		solution_names.emplace_back("x_displacement");
-		solution_names.emplace_back("y_displacement");
-		f_names.emplace_back("f_x");
-		f_names.emplace_back("f_y");
-    if (dim == 3) {
-		solution_names.emplace_back("z_displacement");
-		f_names.emplace_back("f_z");
-    };
-		data_out.add_data_vector (solution, solution_names);
-		data_out.add_data_vector(system_rhs,f_names);
-		data_out.build_patches ();
+		std::vector<DataComponentInterpretation::DataComponentInterpretation> component_type;
+		if (dim==2) {
+			component_type = {DataComponentInterpretation::component_is_part_of_vector, DataComponentInterpretation::component_is_part_of_vector};
+		} else {
+			component_type = {DataComponentInterpretation::component_is_part_of_vector, DataComponentInterpretation::component_is_part_of_vector, DataComponentInterpretation::component_is_part_of_vector};
+		}
+		data_out.add_data_vector(dof_handler, solution, "DSPL", component_type);
+		data_out.add_data_vector(dof_handler, system_rhs, "RHS", component_type);
+		data_out.build_patches();
 		
 		// This section determines the format of the output
 		std::string filename = "../output/solution_";
@@ -602,7 +603,7 @@ namespace fem {
 		std::cout << "Timestep No. " << time.get_timestep() << " time " << time.get_current() << std::endl;
 		double rsn = 1.;
 		unsigned int iter = 0;
-		while (rsn > 1e-8) {
+		while (rsn > 1e-12) {
 			assemble_system();
 			solve();
 			Vector<double> rsd(dof_handler.n_dofs());
