@@ -103,7 +103,7 @@ namespace LinElaInter {
 		// the other arguments determine which values are calculated by 
 		// fe_values(reinit)		
 		FEFaceValues<dim,spacedim> fe_values(fe, quadrature_formula,
-								update_values | 
+								update_values | update_JxW_values | 
 								update_quadrature_points);
 		const unsigned int n_q_points = quadrature_formula.size();
 		const unsigned int n_faces = cell->n_faces();
@@ -142,6 +142,7 @@ namespace LinElaInter {
 							
 							cell_matrix(index_i,index_j) +=
 								N_i * C[component_i][component_j] * N_j
+									* fe_values.JxW(q_point)
 									* ( (face_i == n_faces -2) ? 1 : -1)
 									* ( (face_j == n_faces -2) ? 1 : -1);
 							AssertIsFinite(cell_matrix(index_i,index_j));
