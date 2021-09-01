@@ -21,6 +21,7 @@
 #include <deal.II/lac/solver_cg.h>
 #include <deal.II/lac/sparse_direct.h>
 #include <deal.II/lac/precondition.h>
+#include <deal.II/lac/affine_constraints.h>
 #include <deal.II/grid/tria.h>
 #include <deal.II/grid/grid_generator.h>
 #include <deal.II/grid/grid_refinement.h>
@@ -170,11 +171,14 @@ namespace fem {
 		 */
 		Vector<double>	   solution;
 		Vector<double>	   solution_update;
+		Vector<double>	   residual;
 		/**
 		 * @brief right-hand-side vector of SoE (fint,fvole,fdyn etc.)
 		 * 
 		 */
 		Vector<double>	   system_rhs;
+		
+		AffineConstraints<double> constraints;
 		
 		/**
 		 * @brief Time object implements total-time, dt number of steps etc.
@@ -357,6 +361,7 @@ namespace fem {
 		system_matrix.reinit(sparsity_pattern);
 		solution.reinit(dof_handler.n_dofs());
 		system_rhs.reinit(dof_handler.n_dofs());
+		residual.reinit(dof_handler.n_dofs());
 		incremental_displacement.reinit (dof_handler.n_dofs());
 	}
 	
@@ -366,7 +371,7 @@ namespace fem {
 
 		system_matrix.reinit(sparsity_pattern);
 		system_rhs.reinit(dof_handler.n_dofs());
-		solution.reinit(dof_handler.n_dofs());
+		residual.reinit(dof_handler.n_dofs());
 
 		const unsigned int  dofs_per_cell = fe_bulk.dofs_per_cell;
 		FullMatrix<double>  cell_matrix(dofs_per_cell,dofs_per_cell);
@@ -419,45 +424,47 @@ namespace fem {
 			xmask=std::vector<bool>{true,false,false}, ymask=std::vector<bool>{false,true,false}, zmask=std::vector<bool>{false,false,true};
 		}
 			std::map<types::global_dof_index,double> boundary_values;
-			VectorTools::interpolate_boundary_values (dof_handler,
+
+			constraints.clear();
+			VectorTools::interpolate_boundary_values (
+					dof_handler,
 					1,
 					Functions::ZeroFunction<dim>(dim),
-					boundary_values,
+					constraints,
 					ComponentMask(ymask)
 					);
 			// Here we assigne the BC's calculated in BoundaryValues to
 			// face(2) (the upper side)
-			VectorTools::interpolate_boundary_values (dof_handler,
+			VectorTools::interpolate_boundary_values (
+					dof_handler,
 					2,
 					BoundaryValues<dim>(time.get_timestep(), time.get_no_timesteps(), total_displacement),
-					boundary_values,
+					constraints,
 					ComponentMask(ymask)
 					); 
 
-			VectorTools::interpolate_boundary_values (dof_handler,
+			VectorTools::interpolate_boundary_values (
+					dof_handler,
 					3,
 					Functions::ZeroFunction<dim>(dim),
-					boundary_values,
+					constraints,
 					ComponentMask(xmask)
 					);
 
 			if (dim == 3) {
-				VectorTools::interpolate_boundary_values (dof_handler,
+				VectorTools::interpolate_boundary_values (
+						dof_handler,
 						4,
 						Functions::ZeroFunction<dim>(dim),
-						boundary_values,
+						constraints,
 						ComponentMask(zmask)
 						);
 			}
-												  
+
+			constraints.close();
+
 		// No boundary values are set for face(0) therefore a zero
 		// force / stress BC is applied
-		
-		// apply the boundary values here
-		MatrixTools::apply_boundary_values (boundary_values,
-        system_matrix,
-        solution,
-        system_rhs);
 											
 		// Save the incremental displacement for the update of 
 		// quadrature point history									
@@ -469,9 +476,12 @@ namespace fem {
 	void TopLevel<dim,spacedim>::solve()
 	{
 		SparseDirectUMFPACK solver;
+		solution_update.reinit(dof_handler.n_dofs());
 		solver.initialize(system_matrix);
 		// solver.factorize(system_matrix);
-		solver.vmult(solution,system_rhs);
+		solver.vmult(solution_update,residual);
+		constraints.distribute(solution_update);
+		solution += solution_update;
 	}
 	
 	template <int dim, int spacedim>
@@ -590,8 +600,8 @@ namespace fem {
 		make_grid();
 		std::cout << "grid made" << std::endl;
 		setup_system();
-		assemble_system();
-		solve();
+		// assemble_system();
+		// solve();
 		std::cout << "initial step completed" << std::endl;
 		output_results(); 
 	}
@@ -605,11 +615,11 @@ namespace fem {
 		unsigned int iter = 0;
 		while (rsn > 1e-12) {
 			assemble_system();
+			system_matrix.vmult(residual,solution);
+			residual.add(-1,system_rhs);
+			rsn = residual.l2_norm();
+			constraints.condense(system_matrix,residual);
 			solve();
-			Vector<double> rsd(dof_handler.n_dofs());
-			system_matrix.vmult(rsd,solution);
-			rsd.add(-1,system_rhs);
-			rsn = rsd.l2_norm();
 			iter++;
 			if (iter > 15) {
         cexc::convergence_error exc;
