@@ -152,38 +152,6 @@ namespace LinElaInter {
 			}
 		}
 
-		// cell_matrix.print(std::cout,10,3);	
-		// std::cout << std::endl;
-
-		// Vector<double> qp(n_q_points), N(4);
-		// qp[0] = -1/sqrt(3);
-		// qp[1] = 1/sqrt(3);
-
-		// cell_matrix=0;
-		// for (unsigned int q_point =0; q_point<n_q_points;++q_point){
-
-		// 	N[0]  = 0.5*(1-qp[q_point]);
-		// 	N[1]  = 0.5*(1+qp[q_point]);
-		// 	N[2]  = 0.5*(1-qp[q_point]);
-		// 	N[3]  = 0.5*(1+qp[q_point]);
-
-		// 	for (unsigned int i=0; i<dofs_per_cell; ++i) {
-		// 		const unsigned int 
-		// 			component_i = fe.system_to_component_index(i).first;
-		// 		auto N_i = N[i/dim];
-		// 		for (unsigned int j=0; j<dofs_per_cell; ++j) {	
-		// 			const unsigned int 
-		// 				component_j = fe.system_to_component_index(j).first;
-		// 			auto N_j = N[j/dim];
-		// 			cell_matrix(i,j) += N_i * C[component_i][component_j] * N_j
-		// 													* ( (i<5) ? 1:-1)
-		// 													* ( (j<5) ? 1:-1);
-		// 			AssertIsFinite(cell_matrix(i,j));
-		// 		}
-		// 	}
-		// 	auto x=1;
-		// }
-		// cell_matrix.print(std::cout,10,3);	
 		return cell_matrix;												   
 	};
 
@@ -206,21 +174,6 @@ namespace LinElaInter {
 
 
 		typename Triangulation<dim,spacedim>::active_cell_iterator t=cell;
-		// double A, dA;
-		// Tensor<1,spacedim> jump;
-		// this section gets the bodyforce values 
-		// BodyForce<dim> body_force;
-		// std::vector<Vector<double> > body_force_values (n_q_points*2,
-		// 												Vector<double>(dim));
-		// body_force.vector_value_list (fe_values.get_quadrature_points(),
-		// 								body_force_values);
-
-
-		// Vector<double> qp(n_q_points),w(n_q_points), N(dofs_per_cell/dim);
-		// qp[0] = -1/sqrt(3);
-		// qp[1] = 1/sqrt(3);
-		// w[0] = 0.5;
-		// w[1] = 0.5;
 
 		for (auto q_point = 0; q_point < n_q_points; ++q_point){
 
@@ -240,11 +193,6 @@ namespace LinElaInter {
 				}
 			}
 
-			// N[0]  = 0.5*(1-qp[q_point]);
-			// N[1]  = 0.5*(1+qp[q_point]);
-			// N[2]  = 0.5*(1-qp[q_point]);
-			// N[3]  = 0.5*(1+qp[q_point]);
-
     	auto identity =  Physics::Elasticity::StandardTensors<dim>::I;
 			auto C=stiffness*identity;
 			Tensor<1,dim,double> traction=C*jump;
@@ -263,52 +211,14 @@ namespace LinElaInter {
 														face_dof,face,cell->face_orientation(face),false,false),q_point)
 												* traction[component_i]
 												* fe_values.JxW(q_point)
-												* ( ( face == n_faces -2) ? 1 : -1);
+												* ( ( face == n_faces -2) ? -1 : +1);
 
-					cell_rhs(vector_index) += - fint_i;
+					cell_rhs(vector_index) += fint_i;
 					AssertIsFinite(cell_rhs(vector_index));
 				}
 			}
-
-
-			// cell_rhs = 0;
-			// for (auto i=0; i< dofs_per_cell; ++i){
-			// 	const unsigned int 
-			// 		component_i = fe.system_to_component_index(i).first;
-			// 	// auto fvol_i = N[i/dim] * body_force_values[q_point](component_i);
-			// 	auto fint_i = N[i/dim] * traction[component_i]* ( (i<5) ? 1: -1);
-			// 	// cell_rhs(i) += fint_i - fvol_i;
-			// 	cell_rhs(i) += -fint_i;
-			// 	AssertIsFinite(cell_rhs(i));				
-			// }
-			// auto a = 1;
 		}
 
-		// assemble rhs by looping over dofs and q_points
-		// for (unsigned int i=0; i<dofs_per_cell/2; ++i)
-		// {
-		// 	const unsigned int
-		// 	component_i = fe.system_to_component_index(i).first;
-    //   // jump.clear();
-		// 	for (unsigned int q_point=0; q_point<n_q_points/2; ++q_point) {
-    //     auto N_i = fe_values.shape_value(i,q_point);
-    //     auto N_ip = fe_values.shape_value(i+ dofs_per_cell/2,q_point+n_q_points/2);
-    //     auto G_i = fe_values.shape_grad(i,q_point);
-    //     auto jump = N_ip * Ue[q_point+n_q_points/2] - N_i * Ue[q_point];
-    //     double fint_i = stiffness * jump;
-    //     double fvol_i = N_i * body_force_values[q_point](component_i);
-		// 		// cell_rhs(i) += body_force_values[q_point](component_i) *
-		// 		// 				fe_values.shape_value (i,q_point)
-		// 		// 				*	
-		// 		// 				fe_values.JxW (q_point);
-    //     cell_rhs(i) += (fint_i - fvol_i) ;
-    //     // cell_rhs(i) += (fint_i - fvol_i) * fe_values.JxW(q_point);
-		// 		// AssertIsFinite(cell_rhs(i));				
-		// 		if (!isfinite(cell_rhs(i))){
-		// 			auto a = 1.;
-		// 		}
-		// 	}   
-		// }
 		return cell_rhs;
 	}
 

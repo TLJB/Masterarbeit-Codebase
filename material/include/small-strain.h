@@ -232,7 +232,7 @@ namespace SSLinEla{
 											* stress
 											* fe_values.JxW(q_point))[component_i];
 				}   
-				cell_rhs.add(-1,finte, 1, fvole);
+				cell_rhs.add(+1,finte, -1, fvole);
 				for (auto rhs_val : cell_rhs)
 					AssertIsFinite(rhs_val);				
 		}
