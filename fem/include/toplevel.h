@@ -480,8 +480,8 @@ namespace fem {
 		solver.initialize(system_matrix);
 		// solver.factorize(system_matrix);
 		solver.vmult(solution_update,residual);
-		constraints.distribute(solution_update);
-		solution += solution_update;
+		solution -= solution_update;
+		constraints.distribute(solution);
 	}
 	
 	template <int dim, int spacedim>
@@ -613,14 +613,19 @@ namespace fem {
 		std::cout << "Timestep No. " << time.get_timestep() << " time " << time.get_current() << std::endl;
 		double rsn = 1.;
 		unsigned int iter = 0;
+		assemble_system();
+		constraints.condense(system_matrix,system_rhs);
+		system_matrix.vmult(residual,solution);
+		residual.add(-1,system_rhs);
 		while (rsn > 1e-12) {
+			solve();
+			iter++;
 			assemble_system();
 			system_matrix.vmult(residual,solution);
 			residual.add(-1,system_rhs);
 			rsn = residual.l2_norm();
-			constraints.condense(system_matrix,residual);
-			solve();
-			iter++;
+			std::cout << "  iter = " << iter << ",  residual = " << rsn << std::endl;
+			constraints.condense(system_matrix,system_rhs);
 			if (iter > 15) {
         cexc::convergence_error exc;
         BOOST_THROW_EXCEPTION(exc);

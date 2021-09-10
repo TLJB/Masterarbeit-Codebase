@@ -64,7 +64,7 @@ namespace fem {
 				ExcDimensionMismatch (values.size(), dim));
 		values = 0;
 		if ( dim > 1) {
-		values(1) = displacement_step;
+		values(1) = current_displacement;
 		}
 		else {
 			cexc::exception_base exc;
