@@ -47,6 +47,7 @@
 #include "femtime.h"
 #include "small-strain.h"
 #include "LinElaInter.h"
+#include "DamInter.h"
 #include "pointhistory.h"
 #include "boundaryvalues.h"
 #include <deal.II/fe/fe_interface_values.h>
@@ -195,7 +196,7 @@ namespace fem {
 		 * @brief Interface material model (linear spring)
 		 * 
 		 */
-		LinElaInter::Material<dim,spacedim> inter;
+		DamInter::Material<dim,spacedim> inter;
 		
 		/**
 		 * @brief state dependent variables at quadrature points
@@ -382,7 +383,7 @@ namespace fem {
 				std::tie(cell_matrix,cell_rhs) = cell_contrib;
       }
       else if (cell->material_id() == 2) {
-				cell_contrib = inter.calc_cell_contrib(fe_inter,cell,quadrature_formula_inter,Ue);
+				cell_contrib = inter.calc_cell_contrib(fe_inter,cell,quadrature_formula_inter,Ue,quadrature_point_history);
 				std::tie(cell_matrix,cell_rhs) = cell_contrib;
       }
       else {
@@ -589,7 +590,7 @@ namespace fem {
 						Ue[i] = solution(local_dof_indices[i]);
 					}
 					SymmetricTensor<2,dim> stress = bulk.calc_stress(fe_bulk,cell,quadrature_formula_bulk, Ue, q);
-					local_quadrature_points_history[q].old_stress = stress;
+					local_quadrature_points_history[q].bulk.old_stress = stress;
 				}
 			} else if (cell->material_id() == 2) {
 				for (unsigned int q=0; q<quadrature_formula_inter.size(); ++q) {
@@ -609,8 +610,8 @@ namespace fem {
 		make_grid();
 		std::cout << "grid made" << std::endl;
 		setup_system();
-		// assemble_system();
-		// solve();
+		assemble_system();
+		solve();
 		std::cout << "initial step completed" << std::endl;
 		output_results(); 
 	}
@@ -626,7 +627,7 @@ namespace fem {
 		constraints.condense(system_matrix,system_rhs);
 		system_matrix.vmult(residual,solution);
 		residual.add(-1,system_rhs);
-		while (rsn > 1e-12) {
+		while (rsn > 1e-8) {
 			solve();
 			iter++;
 			assemble_system();
