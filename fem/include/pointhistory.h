@@ -16,6 +16,18 @@
 namespace fem {
 
   using namespace dealii;
+
+	template<int dim>
+	struct PointHistoryBulk {
+		SymmetricTensor<2,dim> strain_pl;
+		double alpha; 
+		SymmetricTensor<2,dim> old_stress;
+	};
+
+	template<int dim> 
+	struct PointHistoryInter {
+		double kappa;
+	};
 	/**
 	 * @brief Save state dependent variables of quadrature point
 	 * 
@@ -24,10 +36,10 @@ namespace fem {
 	template<int dim>
 	struct PointHistory
 	{
-		SymmetricTensor<2,dim> strain_pl;
-		double alpha; 
-		SymmetricTensor<2,dim> old_stress;
+		PointHistoryBulk<dim>  bulk;
+		PointHistoryInter<dim> inter;
 	};
+
 }
 
 #endif
