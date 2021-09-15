@@ -17,6 +17,7 @@
 #include<deal.II/base/tensor.h>
 #include"bodyforce.h"
 #include"pointhistory.h"
+#include<tuple>
 
 /**
  * @brief Namespace for small-strain elasticity + linear-hardening
@@ -47,29 +48,17 @@ namespace SSLinEla{
 		 * 
 		 */
 		~Material();
+
 		/**
-		 * @brief Calculate the elemntal stiffness matrix
+		 * @brief Calculate Element contributions (Ke and RHS)
 		 * 
-		 * @param fe FESystem object (masterElement)
-		 * @param cell pointer to cell
-		 * @param quadrature_formula quadrature formula object
-		 * @param Ue displacement of element nodes
-		 * @return FullMatrix<double> elemental stiffness matrix
+		 * @param fe  The finite Element
+		 * @param cell  The Cell
+		 * @param quadrature_formula  The quadrature formula
+		 * @param Ue  The nodal displacements
+		 * @return std::tuple<FullMatrix<double>,Vector<double>> 
 		 */
-		FullMatrix<double> calc_cell_matrix(FESystem<dim,spacedim> &fe,						
-							  typename DoFHandler<dim,spacedim>::active_cell_iterator &cell,
-							  QGauss<dim>  quadrature_formula,
-                Vector<double> Ue);
-		/**
-		 * @brief Calculate the elemntal right hand side vector
-		 * 
-		 * @param fe FESystem object (masterElement)
-		 * @param cell pointer to cell
-		 * @param quadrature_formula quadrature formula object
-		 * @param Ue displacement of element nodes
-		 * @return Vector<double> elemental right-hand-side vector
-		 */
-		Vector<double> calc_cell_rhs(FESystem<dim,spacedim> &fe,
+		std::tuple<FullMatrix<double>,Vector<double>> calc_cell_contrib(FESystem<dim,spacedim> &fe,
 									typename DoFHandler<dim,spacedim>::active_cell_iterator &cell,
 									QGauss<dim>  quadrature_formula,
                   Vector<double> Ue);
@@ -129,11 +118,8 @@ namespace SSLinEla{
 	Material<dim,spacedim>::~Material()
 	{}
 
-	// calculates the cell matrix,
-	// as input the fe object, the current cell, and the 
-	// quadrature_formula are needed	
 	template<int dim, int spacedim>
-	FullMatrix<double> Material<dim,spacedim>::calc_cell_matrix(FESystem<dim,spacedim> &fe,
+	std::tuple<FullMatrix<double>,Vector<double>> Material<dim,spacedim>::calc_cell_contrib(FESystem<dim,spacedim> &fe,
 									typename DoFHandler<dim,spacedim>::active_cell_iterator &cell,
 									QGauss<dim>  quadrature_formula,
                   Vector<double> Ue)
@@ -147,16 +133,42 @@ namespace SSLinEla{
 		const unsigned int dofs_per_cell = fe.dofs_per_cell;
 		const unsigned int n_q_points = quadrature_formula.size();
 		FullMatrix<double> cell_matrix(dofs_per_cell, dofs_per_cell);		
+		Vector<double> cell_rhs(dofs_per_cell), finte(dofs_per_cell), fvole(dofs_per_cell);
 		unsigned int nodes_per_cell = cell->n_vertices();
+
+		fe_values.reinit(cell);		
+		// this section gets the bodyforce values 
+		BodyForce<dim> body_force;
+		std::vector<Vector<double> > body_force_values (n_q_points,
+														Vector<double>(dim));
+		body_force.vector_value_list (fe_values.get_quadrature_points(),
+										body_force_values);
 
 		// fe_values.reinit calculates the displacement, gradient, 
 		// Jacobian etc.											   
-		fe_values.reinit(cell);		
 		
 		// loop over all quadrature_points
+		SymmetricTensor<2,dim> strain; 
 		for (unsigned int q_point=0; q_point<n_q_points; ++q_point)
 		{	
 			
+			strain=0;
+			for (unsigned int i=0; i<dofs_per_cell; ++i){
+				const unsigned int
+				component_i = fe.system_to_component_index(i).first;
+				for (unsigned int j=0; j<dim; ++j) {
+
+					strain[component_i][j] += Ue[i]*(fe_values.shape_grad(i,q_point))[j];
+
+				}
+
+			}
+			strain = 0.5*(strain + transpose(strain));
+
+			SymmetricTensor<2,dim> stress = E_tensor*strain;
+
+			finte=0;
+			fvole=0;
 			// loop over dofs - note that i=0 is the first dof of the 
 			// first node and i=1 is the second dof of the first node
 			// deal needs this format to rearrange the cell_matrix into
@@ -175,76 +187,25 @@ namespace SSLinEla{
 														*fe_values.shape_grad(j,q_point)
 														*fe_values.JxW(q_point))[component_i][component_j];
 					AssertIsFinite(cell_matrix(i,j));
-				}
-			}
+				} // close loop over second node
 
-
-		}
-		
-		return cell_matrix;												   
-	}
-	
-	// calc_cell_rhs is very similiar to calc_cell_matrix - both could 
-	// be merged into one function
-	template<int dim, int spacedim>
-	Vector<double> Material<dim,spacedim>::calc_cell_rhs(FESystem<dim,spacedim> &fe,
-									typename DoFHandler<dim,spacedim>::active_cell_iterator &cell,
-									QGauss<dim>  quadrature_formula,
-                  Vector<double> Ue)
-	{
-		// See calc_cell_matrix
-		FEValues<dim,spacedim> fe_values(fe, quadrature_formula,
-								update_values | update_gradients | 
-								update_quadrature_points| update_inverse_jacobians | update_JxW_values);
-		fe_values.reinit(cell);						
-		const unsigned int n_q_points = quadrature_formula.size();
-		const unsigned int dofs_per_cell = fe.dofs_per_cell;
-		Vector<double> cell_rhs(dofs_per_cell), finte(dofs_per_cell), fvole(dofs_per_cell);
-		
-		// this section gets the bodyforce values 
-		BodyForce<dim> body_force;
-		std::vector<Vector<double> > body_force_values (n_q_points,
-														Vector<double>(dim));
-		body_force.vector_value_list (fe_values.get_quadrature_points(),
-										body_force_values);
-
-		// // assemble rhs by looping over dofs and q_points
-		for (unsigned int q_point=0; q_point<n_q_points; ++q_point)
-		{
-
-			SymmetricTensor<2,dim> strain; strain=0;
-			for (unsigned int i=0; i<dofs_per_cell; ++i){
-				const unsigned int
-				component_i = fe.system_to_component_index(i).first;
-				for (unsigned int j=0; j<dim; ++j) {
-
-					strain[component_i][j] += Ue[i]*(fe_values.shape_grad(i,q_point))[j];
-
-				}
-
-			}
-			strain = 0.5*(strain + transpose(strain));
-
-			SymmetricTensor<2,dim> stress = E_tensor*strain;
-
-			finte=0;
-			fvole=0;
-			for (unsigned int i=0; i<dofs_per_cell; ++i)	{
-				const unsigned int
-				component_i = fe.system_to_component_index(i).first;
-					fvole(i) += - body_force_values[q_point](component_i) 
-									*	fe_values.shape_value (i,q_point)
-									*	fe_values.JxW (q_point);
-					finte(i) += (fe_values.shape_grad(i,q_point)
-											* stress
-											* fe_values.JxW(q_point))[component_i];
-				}   
+				fvole(i) += - body_force_values[q_point](component_i) 
+								*	fe_values.shape_value (i,q_point)
+								*	fe_values.JxW (q_point);
+				finte(i) += (fe_values.shape_grad(i,q_point)
+										* stress
+										* fe_values.JxW(q_point))[component_i];
+			} // close node over first node
 				cell_rhs.add(+1,finte, -1, fvole);
 				for (auto rhs_val : cell_rhs)
 					AssertIsFinite(rhs_val);				
 		}
-		return cell_rhs;
+
+		return std::make_tuple(cell_matrix,cell_rhs);
+		
+
 	}
+
 
 	template<int dim, int spacedim>
 	SymmetricTensor<2,dim> Material<dim,spacedim>::calc_stress(FESystem<dim,spacedim> &fe,

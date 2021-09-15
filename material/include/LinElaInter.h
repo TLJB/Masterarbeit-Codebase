@@ -19,6 +19,7 @@
 #include<deal.II/base/point.h>
 #include <deal.II/grid/tria.h>
 #include<vector>
+#include<tuple>
 
 /**
  * @brief Namespace of linear elastic Interface Element
@@ -50,35 +51,19 @@ namespace LinElaInter {
 		 */
 		~Material(){};
 
-    /**
-     * @brief Calculate Cell Matrix for Interface Element
-     * 
-     * @param fe FESystem / Finite Element
-     * @param cell active_cell_iterator
-     * @param quadrature_formula quadrature formula object
-     * @param Ue Elemental Displacements
-     * @return FullMatrix<double> 
-     */
-		FullMatrix<double> calc_cell_matrix(FESystem<dim,spacedim> &fe,						
-							  typename DoFHandler<dim,spacedim>::active_cell_iterator &cell,
-							  QGauss<dim-1>  quadrature_formula,
-                Vector<double> Ue
-                );
-
-    
-    /**
-     * @brief Calculate Right Hand Side per cell
-     * 
-     * @param fe 
-     * @param cell 
-     * @param quadrature_formula 
-     * @return Vector<double> 
-     */
-		Vector<double> calc_cell_rhs(FESystem<dim,spacedim> &fe,
+		/**
+		 * @brief Calculate Element contributions (Ke and RHS)
+		 * 
+		 * @param fe  The finite Element
+		 * @param cell  The Cell
+		 * @param quadrature_formula  The quadrature formula
+		 * @param Ue  The nodal displacements
+		 * @return std::tuple<FullMatrix<double>,Vector<double>> 
+		 */
+		std::tuple<FullMatrix<double>,Vector<double>> calc_cell_contrib(FESystem<dim,spacedim> &fe,
 									typename DoFHandler<dim,spacedim>::active_cell_iterator &cell,
 									QGauss<dim-1>  quadrature_formula,
-                  Vector<double> Ue
-                  );
+                  Vector<double> Ue);
 
 		/**
 		 * @brief Calculate the stress Tensor
@@ -93,11 +78,10 @@ namespace LinElaInter {
   };
 
 	template<int dim, int spacedim>
-	FullMatrix<double> Material<dim,spacedim>::calc_cell_matrix(FESystem<dim,spacedim> &fe,
+	std::tuple<FullMatrix<double>,Vector<double>> Material<dim,spacedim>::calc_cell_contrib(FESystem<dim,spacedim> &fe,
 									typename DoFHandler<dim,spacedim>::active_cell_iterator &cell,
 									QGauss<dim-1>  quadrature_formula,
-                  Vector<double> Ue
-                  )
+                  Vector<double> Ue)
 	{
 		// the constructor of fe_values needs fe & quadrature_formula,
 		// the other arguments determine which values are calculated by 
@@ -109,13 +93,33 @@ namespace LinElaInter {
 		const unsigned int n_faces = cell->n_faces();
 		const unsigned int dofs_per_cell = fe.dofs_per_cell/n_faces*2;
 		FullMatrix<double> cell_matrix(dofs_per_cell);		
+		Vector<double> cell_rhs(dofs_per_cell);
 
 		typename Triangulation<dim,spacedim>::active_cell_iterator t=cell;
 
     auto identity =  Physics::Elasticity::StandardTensors<dim>::I;
 		auto C = stiffness*identity;
+		Tensor<1,dim,double> jump;
+		Tensor<1,dim,double> traction;
 
 		for (unsigned int q_point = 0; q_point != n_q_points; ++q_point) {
+
+			jump = 0;
+			for (unsigned int face : {n_faces-2,n_faces-1}) {
+				fe_values.reinit(t,face);	
+				unsigned int dofs_per_face = fe.n_dofs_per_face(face,0);	
+				for (unsigned int face_dof=0; face_dof != dofs_per_face; ++face_dof) {
+					auto component_i = fe.face_system_to_component_index(face_dof,face).first;
+					auto node_i = fe.face_system_to_component_index(face_dof,face).second;
+					auto vector_index = dofs_per_face*(face - (n_faces-2)) + node_i*fe.n_components() + component_i;
+					jump[component_i] += Ue[vector_index]
+															* fe_values.shape_value(
+																fe.face_to_cell_index(
+																	face_dof,face,cell->face_orientation(face),false,false),q_point)
+															* ( (face == n_faces -2) ? -1 : 1);
+				}
+			}
+			traction=C*jump;
 
 			for (unsigned int face_i : {n_faces-2,n_faces-1}) {
 				unsigned int dofs_per_face = fe.n_dofs_per_face(face_i,0);	
@@ -129,6 +133,18 @@ namespace LinElaInter {
 					double N_i = fe_values.shape_value(
 											fe.face_to_cell_index(
 												face_dof_i,face_i,cell->face_orientation(face_i),false,false),q_point);
+					auto vector_index = dofs_per_face*(face_i - (n_faces-2)) + node_i*fe.n_components() + component_i;
+
+					auto fint_i = fe_values.shape_value(
+													fe.face_to_cell_index(
+														face_dof_i,face_i,cell->face_orientation(face_i),false,false),q_point)
+												* traction[component_i]
+												* fe_values.JxW(q_point)
+												* ( ( face_i == n_faces -2) ? -1 : +1);
+
+					cell_rhs(vector_index) += fint_i;
+					AssertIsFinite(cell_rhs(vector_index));
+
 
 					for (unsigned int face_j : {n_faces-2,n_faces-1}) {
 						fe_values.reinit(t,face_j);	
@@ -146,80 +162,13 @@ namespace LinElaInter {
 									* ( (face_i == n_faces -2) ? 1 : -1)
 									* ( (face_j == n_faces -2) ? 1 : -1);
 							AssertIsFinite(cell_matrix(index_i,index_j));
-						}
-					}
-				}
-			}
+						} // close face_dof_j
+					} // close face_j
+				} // close_face_dof_i
+			} // close_face_i
 		}
 
-		return cell_matrix;												   
-	};
-
-	template<int dim, int spacedim>
-	Vector<double> Material<dim,spacedim>::calc_cell_rhs(FESystem<dim,spacedim> &fe,
-									typename DoFHandler<dim,spacedim>::active_cell_iterator &cell,
-									QGauss<dim-1>  quadrature_formula,
-                  Vector<double> Ue
-                  )
-	{
-		// See calc_cell_matrix
-		FEFaceValues<dim,spacedim> fe_values(fe, quadrature_formula,
-								update_values | update_JxW_values | 
-								update_quadrature_points);
-
-		const unsigned int n_q_points = quadrature_formula.size();
-		const unsigned int n_faces = cell->n_faces();
-		const unsigned int dofs_per_cell = fe.dofs_per_cell/n_faces*2;
-		Vector<double> cell_rhs(dofs_per_cell);
-
-
-		typename Triangulation<dim,spacedim>::active_cell_iterator t=cell;
-
-		for (auto q_point = 0; q_point < n_q_points; ++q_point){
-
-			Tensor<1,dim,double> jump;
-			for (unsigned int face : {n_faces-2,n_faces-1}) {
-				fe_values.reinit(t,face);	
-				unsigned int dofs_per_face = fe.n_dofs_per_face(face,0);	
-				for (unsigned int face_dof=0; face_dof != dofs_per_face; ++face_dof) {
-					auto component_i = fe.face_system_to_component_index(face_dof,face).first;
-					auto node_i = fe.face_system_to_component_index(face_dof,face).second;
-					auto vector_index = dofs_per_face*(face - (n_faces-2)) + node_i*fe.n_components() + component_i;
-					jump[component_i] += Ue[vector_index]
-															* fe_values.shape_value(
-																fe.face_to_cell_index(
-																	face_dof,face,cell->face_orientation(face),false,false),q_point)
-															* ( (face == n_faces -2) ? -1 : 1);
-				}
-			}
-
-    	auto identity =  Physics::Elasticity::StandardTensors<dim>::I;
-			auto C=stiffness*identity;
-			Tensor<1,dim,double> traction=C*jump;
-
-			for (unsigned int face : {n_faces-2,n_faces-1}) {
-				typename Triangulation<dim,spacedim>::active_cell_iterator t=cell;
-				fe_values.reinit(t,face);	
-				unsigned int dofs_per_face = fe.n_dofs_per_face(face,0);	
-				for (unsigned int face_dof=0; face_dof != dofs_per_face; ++face_dof) {
-					auto component_i = fe.face_system_to_component_index(face_dof,face).first;
-					auto node_i = fe.face_system_to_component_index(face_dof,face).second;
-					auto vector_index = dofs_per_face*(face - (n_faces-2)) + node_i*fe.n_components() + component_i;
-
-					auto fint_i = fe_values.shape_value(
-													fe.face_to_cell_index(
-														face_dof,face,cell->face_orientation(face),false,false),q_point)
-												* traction[component_i]
-												* fe_values.JxW(q_point)
-												* ( ( face == n_faces -2) ? -1 : +1);
-
-					cell_rhs(vector_index) += fint_i;
-					AssertIsFinite(cell_rhs(vector_index));
-				}
-			}
-		}
-
-		return cell_rhs;
+		return std::make_tuple(cell_matrix,cell_rhs);
 	}
 
 }
