@@ -75,12 +75,19 @@ namespace SSLinEla{
                   Vector<double> Ue);
 									
 		/**
-		 * @brief Calculate the stress Tensor
+		 * @brief 
 		 * 
-		 * @param SymmetricTensor<2,dim> Strain Tensor
-		 * @return SymmetricTensor<2,dim> Stress Tensor 
+		 * @param fe 
+		 * @param cell 
+		 * @param quadrature_formula 
+		 * @param Ue 
+		 * @return SymmetricTensor<2,dim> 
 		 */
-		// SymmetricTensor<2,dim> calc_stress(SymmetricTensor<2,dim> strain);
+		SymmetricTensor<2,dim> calc_stress(FESystem<dim,spacedim> &fe,
+									typename DoFHandler<dim,spacedim>::active_cell_iterator &cell,
+									QGauss<dim>  quadrature_formula,
+                  Vector<double> Ue,
+									unsigned int q_point);
 
 		private:
 		// E_tensor is the classic linear elasticity stress-strain 
@@ -237,6 +244,48 @@ namespace SSLinEla{
 					AssertIsFinite(rhs_val);				
 		}
 		return cell_rhs;
+	}
+
+	template<int dim, int spacedim>
+	SymmetricTensor<2,dim> Material<dim,spacedim>::calc_stress(FESystem<dim,spacedim> &fe,
+								typename DoFHandler<dim,spacedim>::active_cell_iterator &cell,
+								QGauss<dim>  quadrature_formula,
+								Vector<double> Ue,
+								unsigned int q_point)
+	{
+
+		// See calc_cell_matrix
+		FEValues<dim,spacedim> fe_values(fe, quadrature_formula,
+								update_values | update_gradients | 
+								update_quadrature_points| update_inverse_jacobians | update_JxW_values);
+		fe_values.reinit(cell);						
+		const unsigned int n_q_points = quadrature_formula.size();
+		const unsigned int dofs_per_cell = fe.dofs_per_cell;
+		Vector<double> cell_rhs(dofs_per_cell), finte(dofs_per_cell), fvole(dofs_per_cell);
+		
+		// this section gets the bodyforce values 
+		BodyForce<dim> body_force;
+		std::vector<Vector<double> > body_force_values (n_q_points,
+														Vector<double>(dim));
+		body_force.vector_value_list (fe_values.get_quadrature_points(),
+										body_force_values);
+
+		// // assemble rhs by looping over dofs and q_points
+		SymmetricTensor<2,dim> strain; strain=0;
+		for (unsigned int i=0; i<dofs_per_cell; ++i){
+			const unsigned int
+			component_i = fe.system_to_component_index(i).first;
+			for (unsigned int j=0; j<dim; ++j) {
+
+				strain[component_i][j] += Ue[i]*(fe_values.shape_grad(i,q_point))[j];
+
+			}
+
+		}
+		strain = 0.5*(strain + transpose(strain));
+
+		SymmetricTensor<2,dim> stress = E_tensor*strain;
+		return stress;
 	}
 	
 // Material Functions End ----------------------------------------------
