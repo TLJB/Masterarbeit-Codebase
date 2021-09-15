@@ -295,20 +295,6 @@ namespace fem {
         // std::cerr << exc.what();
       }
     }
-    // triangulation.refine_global(5);
-    // try {
-    // std::ofstream out("../output/grid-1.vtk");
-    // if (!out.is_open()) {
-    //   cexc::file_read_error exc;
-    //   BOOST_THROW_EXCEPTION(exc);
-    // }
-    // GridOut       grid_out;
-    // grid_out.write_vtk(triangulation, out);
-    // std::cout << "Grid written to grid-1.svg" << std::endl;
-    // }
-    // catch (std::exception &exc) {
-    //   std::cerr << boost::diagnostic_information(exc) << std::endl;
-    // }
 
 		// initialise the internal variables	   	
 		setup_quadrature_point_history();	
@@ -396,8 +382,6 @@ namespace fem {
 				std::tie(cell_matrix,cell_rhs) = cell_contrib;
       }
       else if (cell->material_id() == 2) {
-        // cell_rhs = inter.calc_cell_rhs(fe_inter, cell, quadrature_formula_inter,Ue);
-        // cell_matrix = inter.calc_cell_matrix(fe_inter,cell,quadrature_formula_inter,Ue); 
 				cell_contrib = inter.calc_cell_contrib(fe_inter,cell,quadrature_formula_inter,Ue);
 				std::tie(cell_matrix,cell_rhs) = cell_contrib;
       }
