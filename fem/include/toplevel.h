@@ -310,7 +310,7 @@ namespace fem {
     // }
 
 		// initialise the internal variables	   	
-		// setup_quadrature_point_history();	
+		setup_quadrature_point_history();	
 
 		// This section names the different sides of the mesh, so that we
 		// can assign different boundary condiditons
@@ -527,28 +527,38 @@ namespace fem {
 	{
 		// This section makes sure that quadrature_point_history is 
 		// empty and of the correct size
-		unsigned int ncell = 0;
-		for (typename Triangulation<dim>::active_cell_iterator
-			cell = triangulation.begin_active();
-			cell != triangulation.end(); ++cell)
+		unsigned int size = 0;
+		for (auto	cell : dof_handler.active_cell_iterators())
 			{
 				triangulation.clear_user_data();
-				ncell++;
+				if (cell->material_id()==1) {
+					size+= quadrature_formula_bulk.size();
+				} else if (cell->material_id() == 2) {
+					size+= quadrature_formula_inter.size();
+				} else {
+					cexc::not_imp_error exc;
+					BOOST_THROW_EXCEPTION(exc);
+				}
 			}
 		std::vector<PointHistory<dim> > tmp;
 		tmp.swap (quadrature_point_history);
 
-		quadrature_point_history.resize(ncell*quadrature_formula_bulk.size());
+		quadrature_point_history.resize(size);
 		
 		// This section the quadratrue_point_history to the quadrature 
 		// points of each cell	
 		unsigned int history_index = 0;
-		for (typename Triangulation<dim,spacedim>::active_cell_iterator
-			cell = triangulation.begin_active();
-			cell != triangulation.end(); ++cell)
+		for (auto cell : dof_handler.active_cell_iterators())
 		{			
 			cell->set_user_pointer (&quadrature_point_history[history_index]);
-			history_index += quadrature_formula_bulk.size();
+			if (cell->material_id()==1) {
+				history_index += quadrature_formula_bulk.size();
+			} else if (cell->material_id() == 2) {
+				history_index += quadrature_formula_inter.size();
+			} else {
+				cexc::not_imp_error exc;
+				BOOST_THROW_EXCEPTION(exc);
+			}
 		}
 		Assert (history_index == quadrature_point_history.size(),ExcInternalError());			
 	}
@@ -567,9 +577,7 @@ namespace fem {
 		displacement_increment_grads (quadrature_formula_bulk.size(), 
 									std::vector<Tensor<1,dim>>(dim));
 		// loop over cells							
-		for (typename DoFHandler<dim,spacedim>::active_cell_iterator
-			cell = dof_handler.begin_active(); cell != dof_handler.end();
-			++cell)
+		for (auto cell : dof_handler.active_cell_iterators())
 		{
 			// get the local_quadrature_points_history of each cell
 			PointHistory<dim> *local_quadrature_points_history
@@ -580,15 +588,28 @@ namespace fem {
 					ExcInternalError());
 			
 			// this section calculates the updated internal variables		
-			fe_values.reinit(cell);
-			fe_values.get_function_gradients (incremental_displacement,
-											  displacement_increment_grads);
-			
-			for (unsigned int q=0; q<quadrature_formula_bulk.size(); ++q)
-			{
-				// const SymmetricTensor<2,dim> 
-				// new_stress = bulk.calc_stress( (get_strain(displacement_increment_grads[q]) - local_quadrature_points_history[q].strain_pl) );
+			// fe_values.reinit(cell);
+			// fe_values.get_function_gradients (incremental_displacement,
+			// 								  displacement_increment_grads);
+			if (cell->material_id()==1) {
+				for (unsigned int q=0; q<quadrature_formula_bulk.size(); ++q) {
+					unsigned int dofs_per_cell = fe_bulk.dofs_per_cell;
+					std::vector<types::global_dof_index> local_dof_indices (dofs_per_cell);
+					cell->get_dof_indices (local_dof_indices);
+					Vector<double> Ue(dofs_per_cell); 
+					for (unsigned int i=0; i<dofs_per_cell; ++i){
+						Ue[i] = solution(local_dof_indices[i]);
+					}
+					SymmetricTensor<2,dim> stress = bulk.calc_stress(fe_bulk,cell,quadrature_formula_bulk, Ue, q);
+					local_quadrature_points_history[q].old_stress = stress;
+				}
+			} else if (cell->material_id() == 2) {
+				for (unsigned int q=0; q<quadrature_formula_inter.size(); ++q) {
 				// local_quadrature_points_history[q].old_stress = new_stress;
+				}
+			} else {
+				cexc::not_imp_error exc;
+				BOOST_THROW_EXCEPTION(exc);
 			}
 		}
 	}
@@ -632,7 +653,7 @@ namespace fem {
 			}
 		}
 		std::cout << "Step completed" << std::endl;
-		// update_quadrature_point_history();
+		update_quadrature_point_history();
 		output_results(); 
 	}
 	   
