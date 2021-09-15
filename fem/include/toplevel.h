@@ -52,6 +52,7 @@
 #include <deal.II/fe/fe_interface_values.h>
 #include <deal.II/grid/grid_in.h>
 #include <deal.II/numerics/data_out_dof_data.h>
+#include<tuple>
 
 #include "CustomExceptions.h"
 #include <boost/throw_exception.hpp>
@@ -376,6 +377,7 @@ namespace fem {
 		const unsigned int  dofs_per_cell = fe_bulk.dofs_per_cell;
 		FullMatrix<double>  cell_matrix(dofs_per_cell,dofs_per_cell);
 		Vector<double>		cell_rhs(dofs_per_cell);
+		std::tuple<FullMatrix<double>,Vector<double>> cell_contrib;
 		std::vector<types::global_dof_index> local_dof_indices (dofs_per_cell);
 		
 		// initialise the counter for the loop over cells
@@ -390,12 +392,14 @@ namespace fem {
         Ue[i] = solution(local_dof_indices[i]);
       }
       if (cell->material_id() == 1) {
-        cell_matrix = bulk.calc_cell_matrix(fe_bulk,cell,quadrature_formula_bulk,Ue); 
-        cell_rhs = bulk.calc_cell_rhs(fe_bulk, cell, quadrature_formula_bulk,Ue);
+				cell_contrib = bulk.calc_cell_contrib(fe_bulk,cell,quadrature_formula_bulk,Ue);
+				std::tie(cell_matrix,cell_rhs) = cell_contrib;
       }
       else if (cell->material_id() == 2) {
-        cell_rhs = inter.calc_cell_rhs(fe_inter, cell, quadrature_formula_inter,Ue);
-        cell_matrix = inter.calc_cell_matrix(fe_inter,cell,quadrature_formula_inter,Ue); 
+        // cell_rhs = inter.calc_cell_rhs(fe_inter, cell, quadrature_formula_inter,Ue);
+        // cell_matrix = inter.calc_cell_matrix(fe_inter,cell,quadrature_formula_inter,Ue); 
+				cell_contrib = inter.calc_cell_contrib(fe_inter,cell,quadrature_formula_inter,Ue);
+				std::tie(cell_matrix,cell_rhs) = cell_contrib;
       }
       else {
         cexc::not_mat_error exc;
