@@ -6,5 +6,5 @@ output/*
 bin/*
 doc/*
 notes/*
-doxygen-awesome-css/*
+doxygen-awesome-css
 .gitmodules
