@@ -1,12 +1,13 @@
 /**
  * @file pointhistory.h
  * @author Till Budde
- * @brief Implements structure to save state dependent variables at quadrature points
+ * @brief Implements structure to save state dependent variables at quadrature
+ * points
  * @version 0.1
  * @date 2021-06-28
- * 
+ *
  * @copyright Copyright (c) 2021
- * 
+ *
  */
 #ifndef POINHISTORY_H
 #define POINHISTORY_H
@@ -15,31 +16,56 @@
 
 namespace fem {
 
-  using namespace dealii;
+using namespace dealii;
 
-	template<int dim>
-	struct PointHistoryBulk {
-		SymmetricTensor<2,dim> strain_pl;
-		double alpha; 
-		SymmetricTensor<2,dim> old_stress;
-	};
+/**
+ * @brief State dependent variables of bulk material
+ *
+ * @tparam dim The dimension
+ *
+ * Members are state dependent variables and other values (such as stress)
+ * That can be saved at each quadrature point
+ *
+ */
+template <int dim> struct PointHistoryBulk {
+  SymmetricTensor<2, dim> strain_pl;
+  double alpha;
+  SymmetricTensor<2, dim> old_stress;
+};
 
-	template<int dim> 
-	struct PointHistoryInter {
-		double kappa;
-	};
-	/**
-	 * @brief Save state dependent variables of quadrature point
-	 * 
-	 * @tparam dim  number of dimensions
-	 */
-	template<int dim>
-	struct PointHistory
-	{
-		PointHistoryBulk<dim>  bulk;
-		PointHistoryInter<dim> inter;
-	};
+/**
+ * @brief State dependent variables of interface material
+ *
+ * @tparam dim The dimension
+ *
+ * Members are state dependent variables and other values (such as traction)
+ * That can be saved at each quadrature point
+ *
+ */
+template <int dim> struct PointHistoryInter { double kappa; };
+/**
+ * @brief Contains structs to save State dependent variable for interface and
+ * 				bulk material
+ *
+ * @tparam dim  number of dimensions
+ *
+ * State dependent variables of interface or bulk can be accessed through
+ * members \ref bulk and \ref inter
+ *
+ */
+template <int dim> struct PointHistory {
+  /**
+   * @brief State dependent variables of bulk material
+   *
+   */
+  PointHistoryBulk<dim> bulk;
+  /**
+   * @brief State dependent variables of interface material
+   *
+   */
+  PointHistoryInter<dim> inter;
+};
 
-}
+} // namespace fem
 
 #endif
