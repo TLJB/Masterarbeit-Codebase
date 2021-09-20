@@ -183,10 +183,9 @@ Material<dim, spacedim>::calc_cell_contrib(
             fe.face_system_to_component_index(face_dof, face).first;
         // get the associated node
         auto node_i = fe.face_system_to_component_index(face_dof, face).second;
-        auto vector_index =
-            dofs_per_face * (face - (n_faces - 2)) + auto vector_index =
-                dofs_per_face * (face - (n_faces - 2)) +
-                node_i * fe.n_components() + component_i;
+        // get the index of the displacement vector
+        auto vector_index = dofs_per_face * (face - (n_faces - 2)) +
+                            node_i * fe.n_components() + component_i;
         // calculate jump
         jump[component_i] +=
             Ue[vector_index] *
