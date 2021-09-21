@@ -96,7 +96,7 @@ void BoundaryValues<dim>::vector_value(const Point<dim> & /*p*/,
   values = 0;
   // set the horizontal component to the current_displacement
   if (dim > 1) {
-    values(1) = current_displacement;
+    values(1) = displacement_step;
   } else {
     cexc::exception_base exc;
     BOOST_THROW_EXCEPTION(exc);
