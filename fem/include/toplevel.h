@@ -117,6 +117,15 @@ private:
   void assemble_system();
 
   /**
+   * @brief Create a constraints object
+   * 
+   * This function clears the \ref constraints object and then
+   * creates the new constraints for this timestep.
+   * 
+   */
+  void create_constraints();
+
+  /**
    * @brief Solve the linear system of equations
    *
    * This function solves the linear system of equations of the Newton-Raphson
@@ -281,7 +290,7 @@ private:
    * @brief Interface material model (linear spring)
    *
    */
-  DamInter::Material<dim, spacedim> inter;
+  LinElaInter::Material<dim, spacedim> inter;
 
   /**
    * @brief state dependent variables at quadrature points
@@ -305,7 +314,7 @@ private:
    * @brief max displacement (reached through linear loadcurve)
    *
    */
-  double total_displacement = 0.05;
+  double total_displacement = -0.05;
 
 };
 
@@ -334,7 +343,7 @@ TopLevel<dim, spacedim>::TopLevel()
   // Initialise the other objects here
   Time time;
   SSLinEla::Material<dim, spacedim> bulk;
-  DamInter::Material<dim, spacedim> inter;
+  LinElaInter::Material<dim, spacedim> inter;
 }
 
 template <int dim, int spacedim> TopLevel<dim, spacedim>::~TopLevel() {
@@ -439,61 +448,8 @@ template <int dim, int spacedim> void TopLevel<dim, spacedim>::setup_system() {
   residual.reinit(dof_handler.n_dofs());
 }
 
-template <int dim, int spacedim>
-void TopLevel<dim, spacedim>::assemble_system() {
-
-  // clear the system of equations (set matrix and vectors to zero)
-  system_matrix.reinit(sparsity_pattern);
-  system_rhs.reinit(dof_handler.n_dofs());
-  residual.reinit(dof_handler.n_dofs());
-
-  // get the number of dofs_per_cell, this is equal in the case of
-  // Lagrange polynomials of degree one but not for higher degrees
-  const unsigned int dofs_per_cell = fe_bulk.dofs_per_cell;
-  // Allocate memory for the cell contributions
-  FullMatrix<double> cell_matrix(dofs_per_cell, dofs_per_cell);
-  Vector<double> cell_rhs(dofs_per_cell);
-  std::tuple<FullMatrix<double>, Vector<double>> cell_contrib;
-  std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell);
-
-  // loop over cells
-  for (typename DoFHandler<dim, spacedim>::active_cell_iterator cell :
-       dof_handler.active_cell_iterators()) {
-    // get the local dof indices from the connectivity list
-    cell->get_dof_indices(local_dof_indices);
-    // get the nodal displacements per element
-    Vector<double> Ue(dofs_per_cell);
-    for (unsigned int i = 0; i < dofs_per_cell; ++i) {
-      Ue[i] = solution(local_dof_indices[i]);
-    }
-    // call the material routine for the bulk or interface element
-    if (cell->material_id() == 1) {
-      cell_contrib =
-          bulk.calc_cell_contrib(fe_bulk, cell, quadrature_formula_bulk, Ue);
-    } else if (cell->material_id() == 2) {
-      cell_contrib =
-          inter.calc_cell_contrib(fe_inter, cell, quadrature_formula_inter, Ue,
-                                  quadrature_point_history);
-    } else {
-      cexc::not_mat_error exc;
-      BOOST_THROW_EXCEPTION(exc);
-    }
-    // unpack the tuple returned by the material routine and write to
-    // cell_matrix or cell_rhs
-    std::tie(cell_matrix, cell_rhs) = cell_contrib;
-
-    // this section arranges the cell matrix/rhs into the global
-    // system of equations
-    for (unsigned int i = 0; i < dofs_per_cell; ++i) {
-      for (unsigned int j = 0; j < dofs_per_cell; ++j) {
-        system_matrix.add(local_dof_indices[i], local_dof_indices[j],
-                          cell_matrix(i, j));
-      }
-      system_rhs(local_dof_indices[i]) += cell_rhs(i);
-    }
-  }
-
-  // Create Boundary Constraints
+template<int dim, int spacedim>
+void TopLevel<dim,spacedim>::create_constraints() {
 
   // create the component_masks, which describe in which spatial direction a
   // BC is applied
@@ -533,6 +489,63 @@ void TopLevel<dim, spacedim>::assemble_system() {
 
   // close the constraint object after all BC's have been generated
   constraints.close();
+
+}
+
+template <int dim, int spacedim>
+void TopLevel<dim, spacedim>::assemble_system() {
+
+  // clear the system of equations (set matrix and vectors to zero)
+  system_matrix.reinit(sparsity_pattern);
+  system_rhs.reinit(dof_handler.n_dofs());
+  residual.reinit(dof_handler.n_dofs());
+
+  // get the number of dofs_per_cell, this is equal in the case of
+  // Lagrange polynomials of degree one but not for higher degrees
+  const unsigned int dofs_per_cell = fe_bulk.dofs_per_cell;
+  // Allocate memory for the cell contributions
+  FullMatrix<double> cell_matrix(dofs_per_cell, dofs_per_cell);
+  Vector<double> cell_rhs(dofs_per_cell);
+  std::tuple<FullMatrix<double>, Vector<double>> cell_contrib;
+  std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell);
+
+  // loop over cells
+  for (typename DoFHandler<dim, spacedim>::active_cell_iterator cell :
+       dof_handler.active_cell_iterators()) {
+    // get the local dof indices from the connectivity list
+    cell->get_dof_indices(local_dof_indices);
+    // get the nodal displacements per element
+    Vector<double> Ue(dofs_per_cell);
+    for (unsigned int i = 0; i < dofs_per_cell; ++i) {
+      Ue[i] = solution(local_dof_indices[i]);
+    }
+    // call the material routine for the bulk or interface element
+    if (cell->material_id() == 1) {
+      cell_contrib =
+          bulk.calc_cell_contrib(fe_bulk, cell, quadrature_formula_bulk, Ue);
+    } else if (cell->material_id() == 2) {
+      cell_contrib =
+          inter.calc_cell_contrib(fe_inter, cell, quadrature_formula_inter, Ue
+                                  );
+    } else {
+      cexc::not_mat_error exc;
+      BOOST_THROW_EXCEPTION(exc);
+    }
+    // unpack the tuple returned by the material routine and write to
+    // cell_matrix or cell_rhs
+    std::tie(cell_matrix, cell_rhs) = cell_contrib;
+
+    // this section arranges the cell matrix/rhs into the global
+    // system of equations
+    for (unsigned int i = 0; i < dofs_per_cell; ++i) {
+      for (unsigned int j = 0; j < dofs_per_cell; ++j) {
+        system_matrix.add(local_dof_indices[i], local_dof_indices[j],
+                          cell_matrix(i, j));
+      }
+      system_rhs(local_dof_indices[i]) += cell_rhs(i);
+    }
+  }
+
 }
 
 template <int dim, int spacedim> void TopLevel<dim, spacedim>::solve() {
@@ -694,6 +707,8 @@ template <int dim, int spacedim> void TopLevel<dim, spacedim>::do_timestep() {
   // initialise norm of residual vector to one, so the loop is entered
   double rsn = 1.;
   unsigned int iter = 0;
+  // create constraints
+  create_constraints();
   // Assemble the system of equations
   assemble_system();
   // Calculate the residual vector
