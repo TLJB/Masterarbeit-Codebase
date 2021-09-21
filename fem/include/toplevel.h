@@ -306,6 +306,7 @@ private:
    *
    */
   double total_displacement = 0.05;
+
 };
 
 // FE Functions --------------------------------------------------------
@@ -544,10 +545,10 @@ template <int dim, int spacedim> void TopLevel<dim, spacedim>::solve() {
   solver.initialize(system_matrix);
   // Solve the linear system of equations
   solver.vmult(solution_update, residual);
-  // perform newton update
-  solution -= solution_update;
   // Distribute boundary constraints to displacement field
-  constraints.distribute(solution);
+  constraints.distribute(solution_update);
+  // perform newton update
+  solution += solution_update;
 }
 
 template <int dim, int spacedim>
@@ -667,13 +668,12 @@ void TopLevel<dim, spacedim>::update_quadrature_point_history() {
       }
     } else if (cell->material_id() == 2) {
       for (unsigned int q = 0; q < quadrature_formula_inter.size(); ++q) {
-        // local_quadrature_points_history[q].old_stress = new_stress;
       }
     } else {
       cexc::not_imp_error exc;
       BOOST_THROW_EXCEPTION(exc);
-    }
-  }
+    } // end cell case
+  }  // end cell loop
 }
 
 template <int dim, int spacedim>
@@ -696,13 +696,13 @@ template <int dim, int spacedim> void TopLevel<dim, spacedim>::do_timestep() {
   unsigned int iter = 0;
   // Assemble the system of equations
   assemble_system();
-  // Apply Boundary Conditions to system of equations
-  constraints.condense(system_matrix, system_rhs);
   // Calculate the residual vector
   system_matrix.vmult(residual, solution);
   residual.add(-1, system_rhs);
   // Newton-Raphson loop
   while (rsn > 1e-8) {
+    // Apply Boundary Conditions to system of equations
+    constraints.condense(system_matrix, residual);
     // Solve Linear System of Equations for each Newton-Raphson step
     solve();
     iter++;
@@ -713,8 +713,6 @@ template <int dim, int spacedim> void TopLevel<dim, spacedim>::do_timestep() {
     residual.add(-1, system_rhs);
     rsn = residual.l2_norm();
     std::cout << "  iter = " << iter << ",  residual = " << rsn << std::endl;
-    // Apply constraints
-    constraints.condense(system_matrix, system_rhs);
     if (iter > 15) {
       cexc::convergence_error exc;
       BOOST_THROW_EXCEPTION(exc);
