@@ -42,7 +42,7 @@ template <int dim> struct PointHistoryBulk {
  * That can be saved at each quadrature point
  *
  */
-template <int dim> struct PointHistoryInter { double kappa; };
+template <int dim> struct PointHistoryInter { double kappa=0.005; };
 /**
  * @brief Contains structs to save State dependent variable for interface and
  * 				bulk material

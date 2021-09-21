@@ -199,14 +199,11 @@ Material<dim, spacedim>::calc_cell_contrib(
 
     // get damage_history variable of last timestep
     kappa = local_quadrature_points_history[q_point].inter.kappa;
-    // check is current jump is greater than last timestep
+    // check if current jump is greater than greatest jump
     kappa = std::max(kappa, jump.norm());
+    local_quadrature_points_history[q_point].inter.kappa = kappa;
     // calculate damage
-    if (kappa < kappa_0) {
-      damage = 0;
-    } else {
-      damage = 1 - kappa_0 / kappa * exp(-(kappa - kappa_0) * Q_0 / Q_f);
-    }
+    damage = 1 - kappa_0 / kappa * exp(-(kappa - kappa_0) * Q_0 / Q_f);
 
     // calculate traction
     traction = (1 - damage) * C * jump;
