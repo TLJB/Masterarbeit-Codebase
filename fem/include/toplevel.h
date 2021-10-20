@@ -54,6 +54,7 @@
 #include <exception>
 #include <fstream>
 #include <iostream>
+#include<iomanip>
 #include <tuple>
 #include <vector>
 
@@ -314,7 +315,7 @@ private:
    * @brief max displacement (reached through linear loadcurve)
    *
    */
-  double total_displacement = -0.05;
+  double total_displacement = 0.05;
 
 };
 
@@ -343,7 +344,7 @@ TopLevel<dim, spacedim>::TopLevel()
   // Initialise the other objects here
   Time time;
   SSLinEla::Material<dim, spacedim> bulk;
-  LinElaInter::Material<dim, spacedim> inter;
+  LinElatInter::Material<dim, spacedim> inter;
 }
 
 template <int dim, int spacedim> TopLevel<dim, spacedim>::~TopLevel() {
@@ -425,6 +426,10 @@ template <int dim, int spacedim> void TopLevel<dim, spacedim>::make_grid() {
       }
     }
   }
+
+  std::ofstream out("../output/grid.msh");
+  GridOut       grid_out;
+  grid_out.write_msh(triangulation, out);
 }
 
 template <int dim, int spacedim> void TopLevel<dim, spacedim>::setup_system() {
@@ -490,6 +495,8 @@ void TopLevel<dim,spacedim>::create_constraints() {
   // close the constraint object after all BC's have been generated
   constraints.close();
 
+
+
 }
 
 template <int dim, int spacedim>
@@ -499,6 +506,7 @@ void TopLevel<dim, spacedim>::assemble_system() {
   system_matrix.reinit(sparsity_pattern);
   system_rhs.reinit(dof_handler.n_dofs());
   residual.reinit(dof_handler.n_dofs());
+  solution_update.reinit(dof_handler.n_dofs());
 
   // get the number of dofs_per_cell, this is equal in the case of
   // Lagrange polynomials of degree one but not for higher degrees
@@ -526,7 +534,7 @@ void TopLevel<dim, spacedim>::assemble_system() {
     } else if (cell->material_id() == 2) {
       cell_contrib =
           inter.calc_cell_contrib(fe_inter, cell, quadrature_formula_inter, Ue
-                                  );
+        );
     } else {
       cexc::not_mat_error exc;
       BOOST_THROW_EXCEPTION(exc);
@@ -558,10 +566,10 @@ template <int dim, int spacedim> void TopLevel<dim, spacedim>::solve() {
   solver.initialize(system_matrix);
   // Solve the linear system of equations
   solver.vmult(solution_update, residual);
-  // Distribute boundary constraints to displacement field
-  constraints.distribute(solution_update);
   // perform newton update
-  solution += solution_update;
+  solution -= solution_update;
+  // Distribute boundary constraints to displacement field
+  constraints.distribute(solution);
 }
 
 template <int dim, int spacedim>
@@ -709,25 +717,24 @@ template <int dim, int spacedim> void TopLevel<dim, spacedim>::do_timestep() {
   unsigned int iter = 0;
   // create constraints
   create_constraints();
-  // Assemble the system of equations
-  assemble_system();
-  // Calculate the residual vector
-  system_matrix.vmult(residual, solution);
-  residual.add(-1, system_rhs);
   // Newton-Raphson loop
   while (rsn > 1e-8) {
-    // Apply Boundary Conditions to system of equations
-    constraints.condense(system_matrix, residual);
-    // Solve Linear System of Equations for each Newton-Raphson step
-    solve();
-    iter++;
-    // Assemble system
+
+    // Assemble the system of equations
     assemble_system();
-    // Calculate new residual
+    // Calculate the residual vector
+    constraints.condense(system_matrix, system_rhs);
+    // constraints.distribute(solution);
     system_matrix.vmult(residual, solution);
     residual.add(-1, system_rhs);
+    constraints.set_zero(residual);
+
     rsn = residual.l2_norm();
     std::cout << "  iter = " << iter << ",  residual = " << rsn << std::endl;
+    if (rsn > 1e-8) {
+      solve();
+      iter++;
+    }
     if (iter > 15) {
       cexc::convergence_error exc;
       BOOST_THROW_EXCEPTION(exc);
@@ -740,6 +747,7 @@ template <int dim, int spacedim> void TopLevel<dim, spacedim>::do_timestep() {
 
 template <int dim, int spacedim> void TopLevel<dim, spacedim>::run() {
   do_initial_timestep();
+
   while (time.get_current() < time.get_end()) {
     do_timestep();
   }
