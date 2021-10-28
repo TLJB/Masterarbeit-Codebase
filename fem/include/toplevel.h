@@ -316,6 +316,8 @@ private:
    *
    */
   double total_displacement = 0.05;
+  unsigned int max_iter = 20;
+  double damping_parameter = 1;
 
 };
 
@@ -344,7 +346,7 @@ TopLevel<dim, spacedim>::TopLevel()
   // Initialise the other objects here
   Time time;
   SSLinEla::Material<dim, spacedim> bulk;
-  LinElatInter::Material<dim, spacedim> inter;
+  LinElaInter::Material<dim, spacedim> inter;
 }
 
 template <int dim, int spacedim> TopLevel<dim, spacedim>::~TopLevel() {
@@ -567,7 +569,7 @@ template <int dim, int spacedim> void TopLevel<dim, spacedim>::solve() {
   // Solve the linear system of equations
   solver.vmult(solution_update, residual);
   // perform newton update
-  solution -= solution_update;
+  solution.add(-damping_parameter,solution_update);
   // Distribute boundary constraints to displacement field
   constraints.distribute(solution);
 }
@@ -715,6 +717,7 @@ template <int dim, int spacedim> void TopLevel<dim, spacedim>::do_timestep() {
   // initialise norm of residual vector to one, so the loop is entered
   double rsn = 1.;
   unsigned int iter = 0;
+  auto res = residual;
   // create constraints
   create_constraints();
   // Newton-Raphson loop
@@ -729,7 +732,10 @@ template <int dim, int spacedim> void TopLevel<dim, spacedim>::do_timestep() {
     residual.add(-1, system_rhs);
     constraints.set_zero(residual);
 
-    rsn = residual.l2_norm();
+    res = residual;
+    constraints.set_zero(res);
+
+    rsn = res.l2_norm();
     std::cout << "  iter = " << iter << ",  residual = " << rsn << std::endl;
     if (rsn > 1e-8) {
       solve();
