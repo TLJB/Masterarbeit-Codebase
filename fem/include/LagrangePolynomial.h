@@ -158,4 +158,4 @@ template <int dim> double LagrangePolynomial<dim>::get_value(int i, int q) {
 };
 } // namespace fem
 
-#endif LAGRANGEPOLYNOMIAL_H
+#endif
