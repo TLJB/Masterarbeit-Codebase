@@ -94,9 +94,11 @@ void BoundaryValues<dim>::vector_value(const Point<dim> & /*p*/,
   // Check wether the dimension of both vectors is equal
   Assert(values.size() == dim, ExcDimensionMismatch(values.size(), dim));
   values = 0;
-  // set the horizontal component to the current_displacement
+  // set all values and extract using mask when filling affineconstraint object
   if (dim > 1) {
-    values(1) = current_displacement;
+    for (auto _v=values.begin(); _v!=values.end(); ++_v) {
+      *_v = current_displacement;
+    }
   } else {
     cexc::exception_base exc;
     BOOST_THROW_EXCEPTION(exc);
