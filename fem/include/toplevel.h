@@ -15,6 +15,7 @@
 
 #include "DamInter.h"
 #include "LinElaInter.h"
+#include "GenElaInter.h"
 #include "boundaryvalues.h"
 #include "femtime.h"
 #include "pointhistory.h"
@@ -57,6 +58,7 @@
 #include<iomanip>
 #include <tuple>
 #include <vector>
+#include<cstdlib>
 
 #include "CustomExceptions.h"
 #include <boost/throw_exception.hpp>
@@ -291,7 +293,7 @@ private:
    * @brief Interface material model (linear spring)
    *
    */
-  LinElaInter::Material<dim, spacedim> inter;
+  GenElaInter::Material<dim, spacedim> inter;
 
   /**
    * @brief state dependent variables at quadrature points
@@ -316,6 +318,9 @@ private:
    *
    */
   double total_displacement = 0.05;
+  bool PRINT = false;
+  unsigned int max_iter = 50;
+  double damping_parameter = 1;
 
 };
 
@@ -344,7 +349,7 @@ TopLevel<dim, spacedim>::TopLevel()
   // Initialise the other objects here
   Time time;
   SSLinEla::Material<dim, spacedim> bulk;
-  LinElatInter::Material<dim, spacedim> inter;
+  GenElaInter::Material<dim, spacedim> inter;
 }
 
 template <int dim, int spacedim> TopLevel<dim, spacedim>::~TopLevel() {
@@ -403,12 +408,14 @@ template <int dim, int spacedim> void TopLevel<dim, spacedim>::make_grid() {
         const Point<dim> face_center = cell->face(f)->center();
 
         if (dim == 2) {
-          if (face_center[1] == -1)
+          if (std::abs(face_center[1] - (-1)) < 1e-8)
             cell->face(f)->set_boundary_id(1);
-          else if (face_center[1] == 3)
+          else if (std::abs(face_center[1] - 3) < 1e-8)
             cell->face(f)->set_boundary_id(2);
-          else if (face_center[0] == -1)
+          else if (std::abs(face_center[0] - (-1)) < 1e-8)
             cell->face(f)->set_boundary_id(3);
+          else if (std::abs(face_center[0] - 1) < 1e-8)
+            cell->face(f)->set_boundary_id(5);
           else
             cell->face(f)->set_boundary_id(0);
         } else if (dim == 3) {
@@ -486,6 +493,10 @@ void TopLevel<dim,spacedim>::create_constraints() {
                                            Functions::ZeroFunction<dim>(dim),
                                            constraints, ComponentMask(xmask));
 
+  // VectorTools::interpolate_boundary_values(dof_handler, 5,
+  //                                          Functions::ZeroFunction<dim>(dim),
+  //                                          constraints, ComponentMask(xmask));
+
   if (dim == 3) {
     VectorTools::interpolate_boundary_values(dof_handler, 4,
                                              Functions::ZeroFunction<dim>(dim),
@@ -494,9 +505,6 @@ void TopLevel<dim,spacedim>::create_constraints() {
 
   // close the constraint object after all BC's have been generated
   constraints.close();
-
-
-
 }
 
 template <int dim, int spacedim>
@@ -506,13 +514,13 @@ void TopLevel<dim, spacedim>::assemble_system() {
   system_matrix.reinit(sparsity_pattern);
   system_rhs.reinit(dof_handler.n_dofs());
   residual.reinit(dof_handler.n_dofs());
-  solution_update.reinit(dof_handler.n_dofs());
 
   // get the number of dofs_per_cell, this is equal in the case of
   // Lagrange polynomials of degree one but not for higher degrees
   const unsigned int dofs_per_cell = fe_bulk.dofs_per_cell;
   // Allocate memory for the cell contributions
   FullMatrix<double> cell_matrix(dofs_per_cell, dofs_per_cell);
+  FullMatrix<double> cell_matrix_ana(dofs_per_cell, dofs_per_cell);
   Vector<double> cell_rhs(dofs_per_cell);
   std::tuple<FullMatrix<double>, Vector<double>> cell_contrib;
   std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell);
@@ -531,17 +539,55 @@ void TopLevel<dim, spacedim>::assemble_system() {
     if (cell->material_id() == 1) {
       cell_contrib =
           bulk.calc_cell_contrib(fe_bulk, cell, quadrature_formula_bulk, Ue);
+      std::tie(cell_matrix, cell_rhs) = cell_contrib;
     } else if (cell->material_id() == 2) {
+      auto Ubackup = Ue;
+      double pertubation = 1e-6;
+      Vector<double> cell_rhs_pert(dofs_per_cell);
+      // std::vector<Vector<double>(dofs_per_cell)> cell_rhs_pert;
       cell_contrib =
           inter.calc_cell_contrib(fe_inter, cell, quadrature_formula_inter, Ue
         );
+      std::tie(cell_matrix_ana, cell_rhs) = cell_contrib;
+      for (unsigned int _i = 0; _i!=dofs_per_cell; ++_i) {
+        Ue[_i] += std::max(pertubation,pertubation*Ue[_i]);
+        cell_contrib =
+            inter.calc_cell_contrib(fe_inter, cell, quadrature_formula_inter, Ue
+                                    );
+        std::tie(std::ignore, cell_rhs_pert) = cell_contrib;
+        for (unsigned int _j = 0; _j!=dofs_per_cell; ++_j) {
+          cell_matrix(_j,_i) = (cell_rhs_pert[_j] - cell_rhs[_j])/std::max(pertubation,pertubation*Ue[_i]);
+        }
+        Ue = Ubackup;
+        // cell_matrix = cell_matrix_ana;
+      }
+      if (PRINT) {
+        std::cout << "cell_rhs = " << std::endl;
+        cell_rhs.print(std::cout,5,true,false);
+        std::cout << "cell_matrix = " << std::endl;
+        cell_matrix.print(std::cout,15,5);
+        std::cout << std::endl;
+        std::cout << "cell_matrix_ana = " << std::endl;
+        cell_matrix_ana.print(std::cout,15,5);
+        std::cout << std::endl;
+        std::cout << "difference = " << std::endl;
+        auto norm_a = cell_matrix_ana.frobenius_norm();
+        for (unsigned int i=0; i< dofs_per_cell; ++i){
+          for (unsigned int j=0; j<dofs_per_cell; ++j){
+            std::cout << std::setw(15) << std::setprecision(5) << (cell_matrix[i][j]- cell_matrix_ana[i][j])/norm_a << "\t";
+          }
+          std::cout << std::endl;
+        }
+        std::cout << std::endl;
+      }
+      cell_matrix = cell_matrix_ana;
     } else {
       cexc::not_mat_error exc;
       BOOST_THROW_EXCEPTION(exc);
     }
     // unpack the tuple returned by the material routine and write to
     // cell_matrix or cell_rhs
-    std::tie(cell_matrix, cell_rhs) = cell_contrib;
+    // std::tie(cell_matrix, cell_rhs) = cell_contrib;
 
     // this section arranges the cell matrix/rhs into the global
     // system of equations
@@ -550,13 +596,14 @@ void TopLevel<dim, spacedim>::assemble_system() {
         system_matrix.add(local_dof_indices[i], local_dof_indices[j],
                           cell_matrix(i, j));
       }
-      system_rhs(local_dof_indices[i]) += cell_rhs(i);
+      system_rhs(local_dof_indices[i]) -= cell_rhs(i);
     }
   }
 
 }
 
 template <int dim, int spacedim> void TopLevel<dim, spacedim>::solve() {
+  // damping_parameter = 1;
   // Create the Linear Solver
   // Use a direct sparse matrix solver
   SparseDirectUMFPACK solver;
@@ -567,9 +614,26 @@ template <int dim, int spacedim> void TopLevel<dim, spacedim>::solve() {
   // Solve the linear system of equations
   solver.vmult(solution_update, residual);
   // perform newton update
-  solution -= solution_update;
+  if (PRINT) {
+  std::cout << std::endl;
+  std::cout << "update = " << std::endl;
+  solution_update.print(std::cout , 15,5,false);
+  std::cout << std::endl;
+  std::cout << "sol = " << std::endl;
+  solution.print(std::cout , 15,5,false);
+  }
+  solution.add(-damping_parameter,solution_update);
+  if (PRINT) {
+  std::cout << std::endl;
+  std::cout << "sol = " << std::endl;
+  solution.print(std::cout , 15,5,false);
+  }
   // Distribute boundary constraints to displacement field
   constraints.distribute(solution);
+  if (PRINT) {
+  std::cout << "sol const = " << std::endl;
+  solution.print(std::cout , 15,5,false);
+  }
 }
 
 template <int dim, int spacedim>
@@ -714,28 +778,64 @@ template <int dim, int spacedim> void TopLevel<dim, spacedim>::do_timestep() {
             << time.get_current() << std::endl;
   // initialise norm of residual vector to one, so the loop is entered
   double rsn = 1.;
+  double rsn_old = rsn;
   unsigned int iter = 0;
+  damping_parameter = 1;
   // create constraints
   create_constraints();
+  if (PRINT)
+    constraints.print(std::cout);
   // Newton-Raphson loop
+  auto res = residual;
   while (rsn > 1e-8) {
+
+    if (iter > 1) {
+      if (rsn - rsn_old > rsn_old*1e-2) {
+        damping_parameter /= 2;
+      } else {
+        damping_parameter = 1;
+      }
+    }
+    rsn_old = rsn;
 
     // Assemble the system of equations
     assemble_system();
     // Calculate the residual vector
+    if (PRINT) {
+      std::cout << "K = " <<  std::endl;
+      system_matrix.print_formatted(std::cout,5,false,15);
+      std::cout << std::endl;
+      std::cout << "fint = " << std::endl;
+      system_rhs.print(std::cout, 15,5,false);
+    }
     constraints.condense(system_matrix, system_rhs);
+    if (PRINT) {
+      std::cout << "K = " <<  std::endl;
+      system_matrix.print_formatted(std::cout,5,false,15);
+    }
     // constraints.distribute(solution);
     system_matrix.vmult(residual, solution);
     residual.add(-1, system_rhs);
-    constraints.set_zero(residual);
 
-    rsn = residual.l2_norm();
+    res = residual;
+    constraints.set_zero(res);
+
+    if (PRINT) {
+    std::cout << std::endl;
+    std::cout << "res = " << std::endl;
+    residual.print(std::cout, 15,5,false);
+    std::cout << std::endl;
+    std::cout << "fint = " << std::endl;
+    system_rhs.print(std::cout, 15,5,false);
+    }
+
+    rsn = res.l2_norm();
     std::cout << "  iter = " << iter << ",  residual = " << rsn << std::endl;
     if (rsn > 1e-8) {
       solve();
       iter++;
     }
-    if (iter > 15) {
+    if (iter > max_iter) {
       cexc::convergence_error exc;
       BOOST_THROW_EXCEPTION(exc);
     }
