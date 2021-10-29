@@ -80,14 +80,16 @@ public:
    */
   SymmetricTensor<2, dim> calc_stress(SymmetricTensor<2, dim> strain);
 
-  void calc_derivatives(Tensor<1, dim> u, Tensor<1, dim> g1, Tensor<1, dim> g2,
-                        Tensor<1, dim> g3);
+  // void calc_derivatives(Tensor<1, dim> u, Tensor<1, dim> g1, Tensor<1, dim>
+  // g2,
+  //                       Tensor<1, dim> g3);
 
   std::tuple<Tensor<1, dim>, Tensor<1, dim>, Tensor<1, dim>, Tensor<1, dim>,
              Tensor<2, dim>, Tensor<2, dim>, Tensor<2, dim>, Tensor<2, dim>,
              Tensor<2, dim>, Tensor<2, dim>, Tensor<2, dim>, Tensor<2, dim>,
              Tensor<2, dim>, Tensor<2, dim>>
-  calc_derivatives(Tensor<1, dim> u, Tensor<1, dim> g1, Tensor<1, dim> g2);
+  calc_derivatives(Tensor<1, dim> u, Tensor<1, dim> g1, Tensor<1, dim> g2,
+                   Tensor<1, dim> g3);
 
 private:
   double c_n = 2e2;
@@ -240,14 +242,9 @@ Material<dim, spacedim>::calc_cell_contrib(
       Psi_g2_g3 = 0;
       Psi_g3_g3 = 0;
     }
-    if (dim == 2) {
-      std::tie(Psi_u, Psi_g1, Psi_g2, Psi_g3, Psi_u_u, Psi_u_g1, Psi_u_g2,
-               Psi_u_g3, Psi_g1_g1, Psi_g1_g2, Psi_g1_g3, Psi_g2_g2, Psi_g2_g3,
-               Psi_g3_g3) = calc_derivatives(jump, g1, normal_vector);
-    } else if (dim == 3) {
-      calc_derivatives(jump, g1, g2, normal_vector);
-    } else {
-    }
+    std::tie(Psi_u, Psi_g1, Psi_g2, Psi_g3, Psi_u_u, Psi_u_g1, Psi_u_g2,
+             Psi_u_g3, Psi_g1_g1, Psi_g1_g2, Psi_g1_g3, Psi_g2_g2, Psi_g2_g3,
+             Psi_g3_g3) = calc_derivatives(jump, g1, g2, normal_vector);
 
     // first loop over faces
     for (unsigned int face_i : {n_faces - 2, n_faces - 1}) {
@@ -368,23 +365,23 @@ single_contract(const Tensor<rank_1, dim, Number> &src1,
   return contract<src1.rank - 1, 0>(src1, src2);
 }
 
-template <int dim, int spacedim>
-void Material<dim, spacedim>::calc_derivatives(Tensor<1, dim> u,
-                                               Tensor<1, dim> g1_cov,
-                                               Tensor<1, dim> g2_cov,
-                                               Tensor<1, dim> g3_cov) {
+// template <int dim, int spacedim>
+// void Material<dim, spacedim>::calc_derivatives(Tensor<1, dim> u,
+//                                                Tensor<1, dim> g1_cov,
+//                                                Tensor<1, dim> g2_cov,
+//                                                Tensor<1, dim> g3_cov) {
 
-  Tensor<1, dim, double> g1_con, g2_con, g3_con, g1xg3, g2xg3;
+//   Tensor<1, dim, double> g1_con, g2_con, g3_con, g1xg3, g2xg3;
 
-  //   g1xg3 = cross_product_3d(g1_cov, g3_cov);
-  //   g2xg3 = cross_product_3d(g2_cov, g3_cov);
+//   //   g1xg3 = cross_product_3d(g1_cov, g3_cov);
+//   //   g2xg3 = cross_product_3d(g2_cov, g3_cov);
 
-  //   g1_con = (g2xg3) / (scalar_product(g1_cov, g2xg3));
-  //   g2_con = (g1xg3) / (scalar_product(g2_cov, g1xg3));
-  //   g3_con = g3_cov;
+//   //   g1_con = (g2xg3) / (scalar_product(g1_cov, g2xg3));
+//   //   g2_con = (g1xg3) / (scalar_product(g2_cov, g1xg3));
+//   //   g3_con = g3_cov;
 
-  //   double I1 = scalar_product(u, u);
-}
+//   //   double I1 = scalar_product(u, u);
+// }
 
 template <int dim, int spacedim>
 std::tuple<Tensor<1, dim>, Tensor<1, dim>, Tensor<1, dim>, Tensor<1, dim>,
@@ -393,17 +390,29 @@ std::tuple<Tensor<1, dim>, Tensor<1, dim>, Tensor<1, dim>, Tensor<1, dim>,
            Tensor<2, dim>, Tensor<2, dim>>
 Material<dim, spacedim>::calc_derivatives(Tensor<1, dim> u,
                                           Tensor<1, dim> g1_cov,
+                                          Tensor<1, dim> g2_cov,
                                           Tensor<1, dim> g3_cov) {
 
   // This function assumes a two dimensional space
-  assert(dim == 2);
+  // assert(dim == 2);
 
-  Tensor<1, dim, double> g1_con, g3_con;
+  Tensor<1, dim, double> g1_con, g2_con, g3_con;
 
-  g1_con = g1_cov / (g1_cov.norm() * g1_cov.norm());
-  g3_con = g3_cov;
+  if (dim == 2) {
+    g1_con = g1_cov / (g1_cov.norm() * g1_cov.norm());
+    g3_con = g3_cov;
+  } else if (dim == 3) {
+    g1_con = cross_product_3d(g2_cov, g3_cov) /
+             single_contract(g2_cov, cross_product_3d(g1_cov, g3_cov));
+    g2_con = cross_product_3d(g1_cov, g3_cov) /
+             single_contract(g1_cov, cross_product_3d(g2_cov, g3_cov));
+    g3_con = g3_cov;
+  }
 
   double g11 = single_contract(g1_con, g1_con);
+  double g12 = single_contract(g1_con, g2_con);
+  double g21 = single_contract(g2_con, g1_con);
+  double g22 = single_contract(g2_con, g2_con);
   //   double g33 = single_contract(g3_con, g3_con);
 
   //   double I1 = single_contract(u, u);
@@ -411,48 +420,86 @@ Material<dim, spacedim>::calc_derivatives(Tensor<1, dim> u,
 
   Tensor<2, dim> u_dy_g1_con = outer_product(u, g1_con);
   Tensor<2, dim> u_dy_g1_cov = outer_product(u, g1_cov);
+  Tensor<2, dim> u_dy_g2_con = outer_product(u, g2_con);
+  Tensor<2, dim> u_dy_g2_cov = outer_product(u, g2_cov);
   Tensor<2, dim> u_dy_g3_con = outer_product(u, g3_con);
   Tensor<2, dim> u_dy_g3_cov = outer_product(u, g3_cov);
 
   Tensor<2, dim> g1_con_dy_g1_con = outer_product(g1_con, g1_con);
+  Tensor<2, dim> g1_con_dy_g2_con = outer_product(g1_con, g2_con);
+  Tensor<2, dim> g2_con_dy_g1_con = outer_product(g2_con, g1_con);
+  Tensor<2, dim> g2_con_dy_g2_con = outer_product(g2_con, g2_con);
+  Tensor<2, dim> g2_con_dy_g2_cov = outer_product(g2_con, g2_cov);
+  Tensor<2, dim> g2_cov_dy_g2_con = outer_product(g2_cov, g2_con);
+  Tensor<2, dim> g2_con_dy_g3_con = outer_product(g2_con, g3_con);
+  Tensor<2, dim> g3_con_dy_g2_con = outer_product(g3_con, g2_con);
   Tensor<2, dim> g3_con_dy_g3_con = outer_product(g3_con, g3_con);
+  Tensor<2, dim> g3_con_dy_g1_con = outer_product(g3_con, g1_con);
 
   double u_sc_g1_con = single_contract(u, g1_con);
+  double u_sc_g2_con = single_contract(u, g2_con);
   double u_sc_g3_con = single_contract(u, g3_con);
   double u_sc_g1_cov = single_contract(u, g1_cov);
+  double u_sc_g2_cov = single_contract(u, g2_cov);
   //   double u_sc_g3_cov = single_contract(u, g3_cov);
 
   /*----------------------------------------------------------------------------
-  Psi = 1/2 ( c_n *(I1-I2) + c_t(I2))
+  Psi = 1/2 ( c_n *(I1-I2-I3) + c_t(I2 + I3))
   ----------------------------------------------------------------------------*/
-  Tensor<1, dim> Psi_u, Psi_g1, Psi_g2, Psi_g3;
-  double Psi_I1, Psi_I2;
+  Tensor<1, dim> Psi_u, Psi_g1, Psi_g2, Psi_g3, I1_u, I2_u, I3_u;
+  double Psi_I1, Psi_I2, Psi_I3;
 
   Psi_I1 = 0.5 * c_n;
   Psi_I2 = 0.5 * (-c_n + c_t);
+  if (dim == 2) {
+    Psi_I3 = 0;
+  } else if (dim == 3) {
+    Psi_I3 = 0.5 * (-c_n + c_t);
+  }
 
-  Tensor<1, dim> I1_u = 2 * u;
-  Tensor<1, dim> I2_u = u_sc_g1_con * g1_cov + u_sc_g1_cov * g1_con;
+  I1_u = 2 * u;
+  I2_u = u_sc_g1_con * g1_cov + u_sc_g1_cov * g1_con;
+  if (dim == 2) {
+    I3_u = 0;
+  } else if (dim == 3) {
+    I3_u = u_sc_g2_con * g2_cov + u_sc_g2_cov * g2_con;
+  }
 
-  Tensor<1, dim> I1_g1;
+  Tensor<1, dim> I1_g1, I2_g1, I3_g1, I1_g2, I2_g2, I3_g2;
   I1_g1 = 0;
-  Tensor<1, dim> I2_g1 =
-      u_sc_g1_con * u +
-      u_sc_g1_cov * (-u_sc_g1_con * g1_con + g11 * u_sc_g3_con * g3_con);
+  I2_g1 = u_sc_g1_con * u +
+          u_sc_g1_cov * (-u_sc_g1_con * g1_con + g11 * u_sc_g3_con * g3_con);
+  if (dim == 2) {
+    I3_g1 = 0;
+  } else if (dim == 3) {
+    I3_g1 = u_sc_g2_cov * (-u_sc_g1_con * g2_con + g21 * u_sc_g3_con * g3_con);
+  }
 
-  Psi_u = fa_I1 * Psi_I1 * I1_u + fa_I2 * Psi_I2 * I2_u;
-  Psi_g1 = fa_I1 * Psi_I1 * I1_g1 + fa_I2 * Psi_I2 * I2_g1;
-  Psi_g2 = 0;
+  Psi_u = fa_I1 * Psi_I1 * I1_u + fa_I2 * Psi_I2 * I2_u + fa_I3 * Psi_I3 * I3_u;
+  Psi_g1 =
+      fa_I1 * Psi_I1 * I1_g1 + fa_I2 * Psi_I2 * I2_g1 + fa_I3 * Psi_I3 * I3_g1;
+  Psi_g2 =
+      fa_I1 * Psi_I1 * I1_g2 + fa_I2 * Psi_I2 * I2_g2 + fa_I3 * Psi_I3 * I3_g2;
   Psi_g3 = 0;
 
+  /*----------------------------------------------------------------------------
+  Second Derivatives
+  ----------------------------------------------------------------------------*/
   auto identity = Physics::Elasticity::StandardTensors<dim>::I;
 
-  Tensor<2, dim> Psi_u_u, Psi_u_g1, Psi_u_g2, Psi_u_g3, I1_u_u, I2_u_u, I2_u_g1,
-      I2_g1_u, I2_g1_g1, Psi_g1_g1, Psi_g1_g2, Psi_g1_g3, Psi_g2_g2, Psi_g2_g3,
+  Tensor<2, dim> Psi_u_u, Psi_u_g1, Psi_u_g2, Psi_u_g3, I1_u_u, I2_u_u, I3_u_u,
+      I2_u_g1, I2_g1_u, I2_g1_g1, I2_u_g2, I2_g2_u, I2_g1_g2, I2_g2_g1,
+      I2_g2_g2, I3_u_g1, I3_g1_u, I3_g1_g1, I3_g1_g2, I3_g2_g1, I3_g2_g2,
+      I3_u_g2, I3_g2_u, Psi_g1_g1, Psi_g1_g2, Psi_g1_g3, Psi_g2_g2, Psi_g2_g3,
       Psi_g3_g3;
 
   I1_u_u = 2 * identity;
   I2_u_u = outer_product(g1_con, g1_cov) + outer_product(g1_cov, g1_con);
+  if (dim == 2) {
+    I3_u_u = 0;
+  } else if (dim == 3) {
+    I3_u_u = outer_product(g2_con, g2_cov) + outer_product(g2_cov, g2_con);
+  }
 
   I2_u_g1 = u_dy_g1_con + u_sc_g1_con * identity +
             outer_product(-u_sc_g1_con * g1_con + g11 * u_sc_g3_con * g3_con,
@@ -470,15 +517,82 @@ Material<dim, spacedim>::calc_derivatives(Tensor<1, dim> u,
                      g11 * outer_product(u_sc_g1_con * g3_con, g3_con) -
                      g11 * outer_product(u_sc_g3_con * g1_con, g3_con));
 
-  Psi_u_u = Psi_I1 * I1_u_u + Psi_I2 * I2_u_u;
-  Psi_u_g1 = Psi_I2 * I2_u_g1;
-  Psi_u_g2 = 0;
+  if (dim == 2) {
+    I2_u_g2 = 0;
+    I2_g2_u = 0;
+    I2_g1_g2 = 0;
+    I2_g2_g1 = 0;
+    I2_g2_g2 = 0;
+    I3_u_u = 0;
+    I3_u_g1 = 0;
+    I3_g1_u = 0;
+    I3_g1_g1 = 0;
+    I3_u_g2 = 0;
+    I3_g2_u = 0;
+    I3_g1_g2 = 0;
+    I3_g2_g1 = 0;
+    I3_g2_g2 = 0;
+  } else if (dim == 3) {
+    I2_u_g2 =
+        outer_product((-u_sc_g2_con * g1_con + g12 * u_sc_g3_con * g3_con),
+                      g1_cov) +
+        u_sc_g1_cov * (-g1_con_dy_g2_con + g12 * g3_con_dy_g3_con);
+    I2_g2_u = transpose(I2_u_g2);
+    I2_g1_g2 = 0; // TODO
+    I2_g2_g2 =
+        u_sc_g1_cov *
+        (outer_product(g1_con,
+                       (u_sc_g2_con * g2_con - g22 * u_sc_g3_con * g3_con)) -
+         u_sc_g2_con * (-g2_con_dy_g1_con + g12 * g3_con_dy_g3_con) +
+         outer_product(u_sc_g3_con * g3_con, -g22 * g1_con - g12 * g2_con) -
+         outer_product(g12 * u_sc_g2_con * g3_con, g3_con) +
+         g12 * u_sc_g3_con * outer_product(-g2_con, g3_con));
+    I3_u_u = g2_con_dy_g2_cov + g2_cov_dy_g2_con;
+    I3_u_g1 =
+        outer_product((-u_sc_g1_con * g2_con + g21 * u_sc_g3_con * g3_con),
+                      g2_cov) +
+        u_sc_g2_cov * (-g2_con_dy_g1_con + g21 * g3_con_dy_g3_con);
+    I3_g1_u = transpose(I3_u_g1);
+    I3_u_g2 =
+        u_dy_g2_con + u_sc_g2_con * identity +
+        outer_product((-u_sc_g2_con * g2_con + g22 * u_sc_g3_con * g3_con),
+                      g2_cov) +
+        u_sc_g2_cov * (-g2_con_dy_g2_con + g22 * g3_con_dy_g3_con);
+    I3_g2_u = transpose(I3_u_g2);
+    I3_g1_g2 =
+        -outer_product(u_sc_g1_con * g2_con, u) +
+        outer_product(g21 * u_sc_g3_con * g3_con, u) +
+        u_sc_g2_cov *
+            (outer_product(u_sc_g2_con * g2_con, g1_con) -
+             outer_product(g12 * u_sc_g3_con * g2_con, g3_con) +
+             outer_product(u_sc_g1_con * g2_con, g2_con) -
+             outer_product(g22 * u_sc_g1_con * g3_con, g3_con) -
+             outer_product(g21 * u_sc_g2_con * g3_con, g3_con) -
+             g21 * u_sc_g3_con * g2_con_dy_g3_con -
+             u_sc_g3_con * (g12 * g3_con_dy_g2_con + g22 * g3_con_dy_g1_con));
+    I3_g2_g1 = transpose(I3_g1_g2);
+    I3_g2_g2 =
+        outer_product(u, (-u_sc_g2_con * g2_con + g22 * u_sc_g3_con * g3_con)) +
+        outer_product((-u_sc_g2_con * g2_con + g22 * u_sc_g3_con * g3_con), u) +
+        u_sc_g2_con *
+            (outer_product(u_sc_g2_con * g2_con, g2_con) -
+             outer_product(-g22 * u_sc_g3_con * g2_con, g3_con) +
+             u_sc_g2_con * (g2_con_dy_g2_con - g22 * g3_con_dy_g3_con) -
+             2 * outer_product(g22 * u_sc_g3_con * g3_con, g2_con) -
+             outer_product(g22 * u_sc_g2_con * g3_con, g3_con) -
+             outer_product(g22 * u_sc_g3_con * g2_con, g3_con));
+  }
+
+  Psi_u_u = fa_I1 * Psi_I1 * I1_u_u + fa_I2 * Psi_I2 * I2_u_u +
+            fa_I3 * Psi_I3 * I3_u_u;
+  Psi_u_g1 = fa_I2 * Psi_I2 * I2_u_g1 + fa_I3 * Psi_I3 * I3_u_g1;
+  Psi_u_g2 = fa_I2 * Psi_I2 * I2_u_g2 + fa_I3 * Psi_I3 * I3_u_g1;
   Psi_u_g3 = 0;
 
-  Psi_g1_g1 = Psi_I2 * I2_g1_g1;
-  Psi_g1_g2 = 0;
+  Psi_g1_g1 = fa_I2 * Psi_I2 * I2_g1_g1 + fa_I3 * Psi_I3 * I3_g1_g1;
+  Psi_g1_g2 = fa_I2 * Psi_I2 * I2_g1_g2 + fa_I3 * Psi_I3 * I3_g1_g2;
   Psi_g1_g3 = 0;
-  Psi_g2_g2 = 0;
+  Psi_g2_g2 = fa_I2 * Psi_I2 * I2_g2_g2 + fa_I3 * I3_g2_g2;
   Psi_g2_g3 = 0;
   Psi_g3_g3 = 0;
 
