@@ -15,6 +15,7 @@
 
 #include "DamInter.h"
 #include "LinElaInter.h"
+#include "GenElaInter.h"
 #include "boundaryvalues.h"
 #include "femtime.h"
 #include "pointhistory.h"
@@ -291,7 +292,7 @@ private:
    * @brief Interface material model (linear spring)
    *
    */
-  LinElaInter::Material<dim, spacedim> inter;
+  GenElaInter::Material<dim, spacedim> inter;
 
   /**
    * @brief state dependent variables at quadrature points
@@ -344,7 +345,7 @@ TopLevel<dim, spacedim>::TopLevel()
   // Initialise the other objects here
   Time time;
   SSLinEla::Material<dim, spacedim> bulk;
-  LinElatInter::Material<dim, spacedim> inter;
+  GenElaInter::Material<dim, spacedim> inter;
 }
 
 template <int dim, int spacedim> TopLevel<dim, spacedim>::~TopLevel() {
