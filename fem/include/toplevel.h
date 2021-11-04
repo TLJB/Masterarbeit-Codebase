@@ -331,6 +331,7 @@ private:
 
   double tol_newton = 1e-8;
   unsigned int max_iter_newton = 15;
+  bool PRINT = false;
 };
 
 // FE Functions --------------------------------------------------------
@@ -574,6 +575,7 @@ void TopLevel<dim, spacedim>::assemble_system() {
   const unsigned int dofs_per_cell = fe_bulk.dofs_per_cell;
   // Allocate memory for the cell contributions
   FullMatrix<double> cell_matrix(dofs_per_cell, dofs_per_cell);
+  FullMatrix<double> cell_matrix_ana(dofs_per_cell, dofs_per_cell);
   Vector<double> cell_rhs(dofs_per_cell);
   std::tuple<FullMatrix<double>, Vector<double>> cell_contrib;
   std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell);
@@ -593,8 +595,46 @@ void TopLevel<dim, spacedim>::assemble_system() {
       cell_contrib =
           bulk.calc_cell_contrib(fe_bulk, cell, quadrature_formula_bulk, Ue);
     } else if (check_material_id(cell->material_id()) == 2) {
+      auto Ubackup = Ue;
+      double pertubation = 1e-6;
+      Vector<double> cell_rhs_pert(dofs_per_cell);
+      // std::vector<Vector<double>(dofs_per_cell)> cell_rhs_pert;
       cell_contrib =
-          inter.calc_cell_contrib(fe_inter, cell, quadrature_formula_inter, Ue);
+          inter.calc_cell_contrib(fe_inter, cell, quadrature_formula_inter, Ue
+        );
+      std::tie(cell_matrix_ana, cell_rhs) = cell_contrib;
+      for (unsigned int _i = 0; _i!=dofs_per_cell; ++_i) {
+        Ue[_i] += std::max(pertubation,pertubation*Ue[_i]);
+        cell_contrib =
+            inter.calc_cell_contrib(fe_inter, cell, quadrature_formula_inter, Ue
+                                    );
+        std::tie(std::ignore, cell_rhs_pert) = cell_contrib;
+        for (unsigned int _j = 0; _j!=dofs_per_cell; ++_j) {
+          cell_matrix(_j,_i) = (cell_rhs_pert[_j] - cell_rhs[_j])/std::max(pertubation,pertubation*Ue[_i]);
+        }
+        Ue = Ubackup;
+        // cell_matrix = cell_matrix_ana;
+      }
+      if (PRINT) {
+        std::cout << "cell_rhs = " << std::endl;
+        cell_rhs.print(std::cout,5,true,false);
+        std::cout << "cell_matrix = " << std::endl;
+        cell_matrix.print(std::cout,15,5);
+        std::cout << std::endl;
+        std::cout << "cell_matrix_ana = " << std::endl;
+        cell_matrix_ana.print(std::cout,15,5);
+        std::cout << std::endl;
+        std::cout << "difference = " << std::endl;
+        auto norm_a = cell_matrix_ana.frobenius_norm();
+        for (unsigned int i=0; i< dofs_per_cell; ++i){
+          for (unsigned int j=0; j<dofs_per_cell; ++j){
+            std::cout << std::setw(15) << std::setprecision(5) << (cell_matrix[i][j]- cell_matrix_ana[i][j])/norm_a << "\t";
+          }
+          std::cout << std::endl;
+        }
+        std::cout << std::endl;
+      }
+      cell_matrix = cell_matrix_ana;
     } else {
       cexc::not_mat_error exc;
       BOOST_THROW_EXCEPTION(exc);
@@ -778,7 +818,6 @@ template <int dim, int spacedim> void TopLevel<dim, spacedim>::do_timestep() {
   // create constraints
   create_constraints();
   // Newton-Raphson loop
-  auto res = residual;
   while (rsn > tol_newton) {
 
     // system_matrix.print_formatted(std::cout,5,false,12);
