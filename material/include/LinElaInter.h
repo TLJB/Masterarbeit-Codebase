@@ -245,10 +245,15 @@ Material<dim, spacedim>::calc_cell_contrib(
                 q_point);
 
             // add contribution to stiffness matrix
+            // std::cout << "C[" << component_i << "][" << component_j 
+            // << "] = " << C[component_i][component_j] << std::endl;
             cell_matrix(index_i, index_j) +=
                 N_i * C[component_i][component_j] * N_j *
-                fe_values.JxW(q_point) * ((face_i == n_faces - 2) ? 1 : -1) *
-                ((face_j == n_faces - 2) ? 1 : -1);
+                fe_values.JxW(q_point) * ((face_i == n_faces - 2) ? -1 : 1) *
+                ((face_j == n_faces - 2) ? -1 : 1);
+
+            // std::cout << "Ke = " <<  std::endl;
+            // cell_matrix.print_formatted(std::cout,5,false,15);
             AssertIsFinite(cell_matrix(index_i, index_j));
           } // close face_dof_j
         }   // close face_j

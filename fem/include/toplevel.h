@@ -321,6 +321,8 @@ private:
    *
    */
   double total_displacement = 0.05;
+  unsigned int max_iter = 20;
+  double damping_parameter = 1;
 
   std::vector<int> bulk_ids;
   std::vector<int> interface_ids;
@@ -624,7 +626,7 @@ template <int dim, int spacedim> void TopLevel<dim, spacedim>::solve() {
   // Solve the linear system of equations
   solver.vmult(solution_update, residual);
   // perform newton update
-  solution -= solution_update;
+  solution.add(-damping_parameter,solution_update);
   // Distribute boundary constraints to displacement field
   constraints.distribute(solution);
 }
@@ -772,6 +774,7 @@ template <int dim, int spacedim> void TopLevel<dim, spacedim>::do_timestep() {
   // initialise norm of residual vector to one, so the loop is entered
   double rsn = 1.;
   unsigned int iter = 0;
+  auto res = residual;
   // create constraints
   create_constraints();
   // Newton-Raphson loop

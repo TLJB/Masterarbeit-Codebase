@@ -28,7 +28,7 @@ int main()
 	try 
 	{
 		// the template parameter decide wether the calculation is 2D or 3D
-		TopLevel<3,3> fem;
+		TopLevel<2,2> fem;
 		fem.run();
 		std::cout << "test run" << std::endl;
 	}
