@@ -14,8 +14,8 @@
 #define TOPLEVEL_H
 
 #include "DamInter.h"
-#include "LinElaInter.h"
 #include "GenElaInter.h"
+#include "LinElaInter.h"
 #include "boundaryvalues.h"
 #include "femtime.h"
 #include "pointhistory.h"
@@ -54,10 +54,12 @@
 #include <deal.II/numerics/vector_tools.h>
 #include <exception>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
-#include<iomanip>
 #include <tuple>
 #include <vector>
+#include<string.h>
+#include<sstream>
 
 #include "CustomExceptions.h"
 #include <boost/throw_exception.hpp>
@@ -120,10 +122,10 @@ private:
 
   /**
    * @brief Create a constraints object
-   * 
+   *
    * This function clears the \ref constraints object and then
    * creates the new constraints for this timestep.
-   * 
+   *
    */
   void create_constraints();
 
@@ -188,6 +190,8 @@ private:
    *
    */
   void do_timestep();
+
+  int check_material_id(int);
 
   // check_for_distorted_cells = true necessary for zero volume elements
   const bool check_for_distorted_cells = false;
@@ -318,6 +322,13 @@ private:
    */
   double total_displacement = 0.05;
 
+  std::vector<int> bulk_ids;
+  std::vector<int> interface_ids;
+
+  std::string mesh_filename;
+
+  double tol_newton = 1e-8;
+  unsigned int max_iter_newton = 15;
 };
 
 // FE Functions --------------------------------------------------------
@@ -346,6 +357,11 @@ TopLevel<dim, spacedim>::TopLevel()
   Time time;
   SSLinEla::Material<dim, spacedim> bulk;
   GenElaInter::Material<dim, spacedim> inter;
+  if (dim == 2) {
+    mesh_filename = "../mesh/test2d_out.msh";
+  } else if (dim == 3) {
+    mesh_filename = "../mesh/test3d_out.msh";
+  }
 }
 
 template <int dim, int spacedim> TopLevel<dim, spacedim>::~TopLevel() {
@@ -353,19 +369,44 @@ template <int dim, int spacedim> TopLevel<dim, spacedim>::~TopLevel() {
   system_matrix.clear();
 }
 
+template <int dim, int spacedim>
+int TopLevel<dim, spacedim>::check_material_id(int id) {
+
+  // interface_ids = {2};
+  // bulk_ids = {1};
+  if (std::find(bulk_ids.begin(), bulk_ids.end(), id) != bulk_ids.end()) {
+    return 1;
+  } else if (std::find(interface_ids.begin(), interface_ids.end(), id) !=
+             interface_ids.end()) {
+    return 2;
+  } else {
+    return -1;
+  }
+}
+
 template <int dim, int spacedim> void TopLevel<dim, spacedim>::make_grid() {
   // The distincion of cases is only necessary because the filename is hardcoded
   // [ ] TODO Remove later
+  std::ifstream input_file(mesh_filename);
+  if (!input_file.is_open()) {
+    cexc::file_read_error exc;
+    BOOST_THROW_EXCEPTION(exc);
+  }
   if (dim == 2) {
     // Object that reads the input mesh file
     GridIn<dim> grid_in;
     // link the input reader to the triangulation
     grid_in.attach_triangulation(triangulation);
-    std::ifstream input_file("../mesh/mesh_manual-2d.msh");
-    if (!input_file.is_open()) {
-      cexc::file_read_error exc;
-      BOOST_THROW_EXCEPTION(exc);
+    // exception catch necessary to allow for zero volume elements
+    try {
+      grid_in.read_msh(input_file);
+    } catch (std::exception &exc) {
+      // ignore
+      std::cerr << boost::diagnostic_information(exc) << std::endl;
     }
+  } else if (dim == 3) {
+    GridIn<dim> grid_in;
+    grid_in.attach_triangulation(triangulation);
     // exception catch necessary to allow for zero volume elements
     try {
       grid_in.read_msh(input_file);
@@ -374,22 +415,42 @@ template <int dim, int spacedim> void TopLevel<dim, spacedim>::make_grid() {
       std::cerr << boost::diagnostic_information(exc) << std::endl;
     }
 
-  } else if (dim == 3) {
-    GridIn<dim> grid_in;
-    grid_in.attach_triangulation(triangulation);
-    std::ifstream input_file("../mesh/mesh_manual-3d.msh");
-    if (!input_file.is_open()) {
-      cexc::file_read_error exc;
-      BOOST_THROW_EXCEPTION(exc);
-    }
-    // exception catch necessary to allow for zero volume elements
-    try {
-      grid_in.read_msh(input_file);
-    } catch (std::exception &exc) {
-      // ignore
-      // std::cerr << exc.what();
+  }
+  input_file.close();
+  input_file.open(mesh_filename);
+  if (!input_file.is_open()) {
+    cexc::file_read_error exc;
+    BOOST_THROW_EXCEPTION(exc);
+  }
+  bool stop=false;
+  std::string line;
+  int n_physical_names;
+  while (input_file.good() && !stop) {
+    std::getline(input_file,line);
+    if (line.find("$PhysicalNames")!=std::string::npos) {
+      while (input_file.good() && !stop) {
+        std::getline(input_file,line);
+        if (line.find("$EndPhysicalNames")!=std::string::npos) {
+          stop = true;
+          break;
+        }
+        if (line.length() ==1) {
+          // n_physical_names = int(line);
+        } else {
+          int ignore, tag;
+          std::string name;
+          std::istringstream iss(line);
+          iss >> ignore >> tag >> name;
+          if (name.find("interface")!=std::string::npos) {
+            interface_ids.push_back(tag);
+          } else if (name.find("bulk")!=std::string::npos) {
+            bulk_ids.push_back(tag);
+          }
+        }
+      }
     }
   }
+  input_file.close();
 
   // initialise the internal variables
   setup_quadrature_point_history();
@@ -429,7 +490,7 @@ template <int dim, int spacedim> void TopLevel<dim, spacedim>::make_grid() {
   }
 
   std::ofstream out("../output/grid.msh");
-  GridOut       grid_out;
+  GridOut grid_out;
   grid_out.write_msh(triangulation, out);
 }
 
@@ -454,8 +515,8 @@ template <int dim, int spacedim> void TopLevel<dim, spacedim>::setup_system() {
   residual.reinit(dof_handler.n_dofs());
 }
 
-template<int dim, int spacedim>
-void TopLevel<dim,spacedim>::create_constraints() {
+template <int dim, int spacedim>
+void TopLevel<dim, spacedim>::create_constraints() {
 
   // create the component_masks, which describe in which spatial direction a
   // BC is applied
@@ -495,9 +556,6 @@ void TopLevel<dim,spacedim>::create_constraints() {
 
   // close the constraint object after all BC's have been generated
   constraints.close();
-
-
-
 }
 
 template <int dim, int spacedim>
@@ -529,13 +587,12 @@ void TopLevel<dim, spacedim>::assemble_system() {
       Ue[i] = solution(local_dof_indices[i]);
     }
     // call the material routine for the bulk or interface element
-    if (cell->material_id() == 1) {
+    if (check_material_id(cell->material_id()) == 1) {
       cell_contrib =
           bulk.calc_cell_contrib(fe_bulk, cell, quadrature_formula_bulk, Ue);
-    } else if (cell->material_id() == 2) {
+    } else if (check_material_id(cell->material_id()) == 2) {
       cell_contrib =
-          inter.calc_cell_contrib(fe_inter, cell, quadrature_formula_inter, Ue
-        );
+          inter.calc_cell_contrib(fe_inter, cell, quadrature_formula_inter, Ue);
     } else {
       cexc::not_mat_error exc;
       BOOST_THROW_EXCEPTION(exc);
@@ -554,7 +611,6 @@ void TopLevel<dim, spacedim>::assemble_system() {
       system_rhs(local_dof_indices[i]) += cell_rhs(i);
     }
   }
-
 }
 
 template <int dim, int spacedim> void TopLevel<dim, spacedim>::solve() {
@@ -623,9 +679,9 @@ void TopLevel<dim, spacedim>::setup_quadrature_point_history() {
   unsigned int size = 0;
   for (auto cell : dof_handler.active_cell_iterators()) {
     triangulation.clear_user_data();
-    if (cell->material_id() == 1) {
+    if (check_material_id(cell->material_id()) == 1) {
       size += quadrature_formula_bulk.size();
-    } else if (cell->material_id() == 2) {
+    } else if (check_material_id(cell->material_id()) == 2) {
       size += quadrature_formula_inter.size();
     } else {
       cexc::not_imp_error exc;
@@ -641,9 +697,9 @@ void TopLevel<dim, spacedim>::setup_quadrature_point_history() {
   unsigned int history_index = 0;
   for (auto cell : dof_handler.active_cell_iterators()) {
     cell->set_user_pointer(&quadrature_point_history[history_index]);
-    if (cell->material_id() == 1) {
+    if (check_material_id(cell->material_id()) == 1) {
       history_index += quadrature_formula_bulk.size();
-    } else if (cell->material_id() == 2) {
+    } else if (check_material_id(cell->material_id()) == 2) {
       history_index += quadrature_formula_inter.size();
     } else {
       cexc::not_imp_error exc;
@@ -675,7 +731,7 @@ void TopLevel<dim, spacedim>::update_quadrature_point_history() {
            ExcInternalError());
 
     // this section calculates the updated internal variables
-    if (cell->material_id() == 1) {
+    if (check_material_id(cell->material_id()) == 1) {
       for (unsigned int q = 0; q < quadrature_formula_bulk.size(); ++q) {
         unsigned int dofs_per_cell = fe_bulk.dofs_per_cell;
         std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell);
@@ -688,14 +744,14 @@ void TopLevel<dim, spacedim>::update_quadrature_point_history() {
             bulk.calc_stress(fe_bulk, cell, quadrature_formula_bulk, Ue, q);
         local_quadrature_points_history[q].bulk.old_stress = stress;
       }
-    } else if (cell->material_id() == 2) {
+    } else if (check_material_id(cell->material_id()) == 2) {
       for (unsigned int q = 0; q < quadrature_formula_inter.size(); ++q) {
       }
     } else {
       cexc::not_imp_error exc;
       BOOST_THROW_EXCEPTION(exc);
     } // end cell case
-  }  // end cell loop
+  }   // end cell loop
 }
 
 template <int dim, int spacedim>
@@ -719,8 +775,10 @@ template <int dim, int spacedim> void TopLevel<dim, spacedim>::do_timestep() {
   // create constraints
   create_constraints();
   // Newton-Raphson loop
-  while (rsn > 1e-8) {
+  auto res = residual;
+  while (rsn > tol_newton) {
 
+    // system_matrix.print_formatted(std::cout,5,false,12);
     // Assemble the system of equations
     assemble_system();
     // Calculate the residual vector
@@ -728,15 +786,16 @@ template <int dim, int spacedim> void TopLevel<dim, spacedim>::do_timestep() {
     // constraints.distribute(solution);
     system_matrix.vmult(residual, solution);
     residual.add(-1, system_rhs);
-    constraints.set_zero(residual);
+    res = residual;
+    constraints.set_zero(res);
 
-    rsn = residual.l2_norm();
+    rsn = res.l2_norm();
     std::cout << "  iter = " << iter << ",  residual = " << rsn << std::endl;
-    if (rsn > 1e-8) {
+    if (rsn > tol_newton) {
       solve();
       iter++;
     }
-    if (iter > 15) {
+    if (iter > max_iter_newton) {
       cexc::convergence_error exc;
       BOOST_THROW_EXCEPTION(exc);
     }
