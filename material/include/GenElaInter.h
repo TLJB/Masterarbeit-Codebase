@@ -70,7 +70,8 @@ public:
   std::tuple<FullMatrix<double>, Vector<double>> calc_cell_contrib(
       FESystem<dim, spacedim> &fe,
       typename DoFHandler<dim, spacedim>::active_cell_iterator &cell,
-      QGauss<dim - 1> quadrature_formula, Vector<double> Ue);
+      QGauss<dim - 1> quadrature_formula, Vector<double> Ue,
+      std::vector<PointHistory<dim>> &quadrature_point_history);
 
   /**
    * @brief Calculate the stress Tensor
@@ -92,8 +93,8 @@ public:
                    Tensor<1, dim> g3);
 
 private:
-  double c_n = 2e2;
-  double c_t = 10e2;
+  double c_n = 210; // 2e2;
+  double c_t = 210; // 1e2;
   double fa_I1 = 1, fa_I2 = 1, fa_I3 = 1;
   double stiffness = 210; /*!< The stiffness of the spring */
 };
@@ -103,7 +104,8 @@ std::tuple<FullMatrix<double>, Vector<double>>
 Material<dim, spacedim>::calc_cell_contrib(
     FESystem<dim, spacedim> &fe,
     typename DoFHandler<dim, spacedim>::active_cell_iterator &cell,
-    QGauss<dim - 1> quadrature_formula, Vector<double> Ue) {
+    QGauss<dim - 1> quadrature_formula, Vector<double> Ue,
+    std::vector<PointHistory<dim>> &quadrature_point_history) {
 
   // the constructor of feface_values needs fe & quadrature_formula,
   // the other arguments determine which values are calculated by
@@ -148,6 +150,16 @@ Material<dim, spacedim>::calc_cell_contrib(
   Tensor<1, dim, double> grad;
   Tensor<1, dim, double> g1;
   Tensor<1, dim, double> g2;
+  double wn;
+  double alpha;
+
+  // get the local_quadrature_points_history of each cell
+  PointHistory<dim> *local_quadrature_points_history =
+      reinterpret_cast<PointHistory<dim> *>(cell->user_pointer());
+  Assert(local_quadrature_points_history >= &quadrature_point_history.front(),
+         ExcInternalError());
+  Assert(local_quadrature_points_history < &quadrature_point_history.back(),
+         ExcInternalError());
 
   // loop over quadrature points
   for (unsigned int q_point = 0; q_point != n_q_points; ++q_point) {
@@ -157,6 +169,8 @@ Material<dim, spacedim>::calc_cell_contrib(
     normal_vector = 0;
     g1 = 0;
     g2 = 0;
+    wn = 0;
+    alpha = local_quadrature_points_history[q_point].inter.alpha;
 
     /**
      * It should be noted, that in general the FeFaceValues class loops over
@@ -220,6 +234,10 @@ Material<dim, spacedim>::calc_cell_contrib(
     Calculate tangential and normal base vectors (g) of the interface
     --------------------------------------------------------------------------*/
     normal_vector /= normal_vector.norm();
+    wn = scalar_product(jump, normal_vector);
+    if (wn < 0) {
+      // local_quadrature_points_history[q_point].inter.alpha *= 2;
+    }
     // calculate traction
     traction = C * jump;
 
@@ -281,7 +299,9 @@ Material<dim, spacedim>::calc_cell_contrib(
 
         // calculate the internal force fector
         double fint_i =
-            (N_i * ((face_i == n_faces - 2) ? -1 : 1) * Psi_u[component_i] +
+            (N_i * ((face_i == n_faces - 2) ? -1 : 1) *
+                 (Psi_u[component_i] + alpha * (wn < 0 ? -wn * wn : 0) *
+                                           normal_vector[component_i]) +
              0.5 * (gamma_i[0] * Psi_g1[component_i] +
                     ((dim == 3) ? gamma_i[1] : 0) * Psi_g2[component_i])) *
             fe_values.JxW(q_point);
@@ -427,6 +447,7 @@ Material<dim, spacedim>::calc_derivatives(Tensor<1, dim> u,
 
   Tensor<2, dim> g1_con_dy_g1_con = outer_product(g1_con, g1_con);
   Tensor<2, dim> g1_con_dy_g2_con = outer_product(g1_con, g2_con);
+  Tensor<2, dim> g1_con_dy_g3_con = outer_product(g1_con, g3_con);
   Tensor<2, dim> g2_con_dy_g1_con = outer_product(g2_con, g1_con);
   Tensor<2, dim> g2_con_dy_g2_con = outer_product(g2_con, g2_con);
   Tensor<2, dim> g2_con_dy_g2_cov = outer_product(g2_con, g2_cov);
@@ -538,7 +559,15 @@ Material<dim, spacedim>::calc_derivatives(Tensor<1, dim> u,
                       g1_cov) +
         u_sc_g1_cov * (-g1_con_dy_g2_con + g12 * g3_con_dy_g3_con);
     I2_g2_u = transpose(I2_u_g2);
-    I2_g1_g2 = 0; // TODO
+    I2_g1_g2 = // TODO
+        -u_sc_g2_con * u_dy_g1_cov + g12 * u_sc_g3_con * u_dy_g3_con +
+        u_sc_g1_cov * (u_sc_g2_con * g1_con_dy_g1_con +
+                       g12 * u_sc_g3_con * g1_con_dy_g3_con +
+                       u_sc_g1_con * g2_con_dy_g1_con -
+                       g12 * u_sc_g1_con * g3_con_dy_g3_con -
+                       g11 * u_sc_g2_con * g3_con_dy_g3_con -
+                       g11 * u_sc_g3_con * g2_con_dy_g3_con +
+                       2 * u_sc_g3_con * outer_product(g3_con, -g12 * g1_con));
     I2_g2_g2 =
         u_sc_g1_cov *
         (outer_product(g1_con,
