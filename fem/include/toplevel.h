@@ -16,11 +16,13 @@
 #include "DamInter.h"
 #include "GenElaInter.h"
 #include "LinElaInter.h"
+#include "NeoHooke.h"
 #include "boundaryvalues.h"
 #include "femtime.h"
 #include "pointhistory.h"
 #include "small-strain.h"
 #include <assert.h>
+#include <cstdlib>
 #include <deal.II/base/function.h>
 #include <deal.II/base/quadrature_lib.h>
 #include <deal.II/base/symmetric_tensor.h>
@@ -56,14 +58,15 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <sstream>
+#include <string.h>
 #include <tuple>
 #include <vector>
-#include<cstdlib>
-#include<string.h>
-#include<sstream>
 
 #include "CustomExceptions.h"
 #include <boost/throw_exception.hpp>
+
+#include "timer.h"
 
 /**
  * @brief Main namespace for the FEM calculation
@@ -83,7 +86,7 @@ using namespace dealii;
  * @tparam dim Number of Dimensions
  * @tparam spacedim of spatial dimensions
  */
-template <int dim, int spacedim, bool num=false> class TopLevel {
+template <int dim, int spacedim, bool num = false> class TopLevel {
 public:
   TopLevel();
   ~TopLevel();
@@ -140,7 +143,7 @@ private:
    * (the displacement field)
    *
    */
-  void solve();
+  void solve(unsigned int iter);
 
   /**
    * @brief Writes the output to a vtk file
@@ -192,10 +195,20 @@ private:
    */
   void do_timestep();
 
+  /**
+   * @brief Check whether the material is of type bulk or interface
+   *
+   * @return int (1) if the material is of type bulk, (2) if of type interface
+   * (-1) if neither
+   */
   int check_material_id(int);
 
-  // check_for_distorted_cells = true necessary for zero volume elements
-  const bool check_for_distorted_cells = false;
+  /**
+   * @brief check_for_distorted_cells = true necessary for zero volume elements
+   * or was in version 9.2 of deal
+   *
+   */
+  const bool check_for_distorted_cells = true;
   /**
    * @brief type of mesh smoothing
    *
@@ -289,15 +302,15 @@ private:
    */
   Time time;
   /**
-   * @brief Bulk material model (Small-Strain Linear elasticity)
+   * @brief Bulk material model (NeoHooke)
    *
    */
-  SSLinEla::Material<dim, spacedim> bulk;
+  NeoHooke::Material<dim, spacedim> bulk;
   /**
-   * @brief Interface material model (linear spring)
+   * @brief Interface material model (Change Namespace accordingly)
    *
    */
-  GenElaInter::Material<dim, spacedim> inter;
+  LinElaInter::Material<dim, spacedim> inter;
 
   /**
    * @brief state dependent variables at quadrature points
@@ -321,18 +334,45 @@ private:
    * @brief max displacement (reached through linear loadcurve)
    *
    */
-  double total_displacement = 0.05;
+  double total_displacement = 0.2;
+  /**
+   * @brief Damping parameter of Newton Raphson scheme
+   *
+   */
   double damping_parameter = 1;
 
+  /**
+   * @brief Vector of material-ids associated with bulk material
+   *
+   */
   std::vector<int> bulk_ids;
+  /**
+   * @brief Vector of material-ids associated with interface material
+   *
+   */
   std::vector<int> interface_ids;
 
+  /**
+   * @brief Filename of the .Msh-file
+   *
+   */
   std::string mesh_filename;
 
+  /**
+   * @brief Pertubation used for numerical tangent (if num)
+   *
+   */
   double pertubation_tangent = 1e-6;
+  /**
+   * @brief tolerance of residual of newton raphson scheme
+   *
+   */
   double tol_newton = 1e-8;
-  unsigned int max_iter_newton = 15;
-  bool PRINT = false;
+  /**
+   * @brief Maximum number of Newton steps
+   *
+   */
+  unsigned int max_iter_newton = 50;
 };
 
 // FE Functions --------------------------------------------------------
@@ -358,17 +398,15 @@ TopLevel<dim, spacedim, num>::TopLevel()
       // direction
       quadrature_formula_bulk(2), quadrature_formula_inter(2) {
   // Initialise the other objects here
-  Time time;
-  SSLinEla::Material<dim, spacedim> bulk;
-  GenElaInter::Material<dim, spacedim> inter;
   if (dim == 2) {
-    mesh_filename = "../mesh/test2d_out.msh";
+    mesh_filename = "../mesh/2d.msh";
   } else if (dim == 3) {
-    mesh_filename = "../mesh/test3d_out.msh";
+    mesh_filename = "../mesh/3d.msh";
   }
 }
 
-template <int dim, int spacedim, bool num> TopLevel<dim, spacedim, num>::~TopLevel() {
+template <int dim, int spacedim, bool num>
+TopLevel<dim, spacedim, num>::~TopLevel() {
   dof_handler.clear();
   system_matrix.clear();
 }
@@ -376,8 +414,12 @@ template <int dim, int spacedim, bool num> TopLevel<dim, spacedim, num>::~TopLev
 template <int dim, int spacedim, bool num>
 int TopLevel<dim, spacedim, num>::check_material_id(int id) {
 
-  // interface_ids = {2};
-  // bulk_ids = {1};
+  // if both vectors are empty probably a Version 1 .Msh file was used
+  // test mesh used ids 2 and 1 so fill the vector with those
+  if (bulk_ids.empty() && interface_ids.empty()) {
+    interface_ids = {2};
+    bulk_ids = {1};
+  }
   if (std::find(bulk_ids.begin(), bulk_ids.end(), id) != bulk_ids.end()) {
     return 1;
   } else if (std::find(interface_ids.begin(), interface_ids.end(), id) !=
@@ -388,65 +430,54 @@ int TopLevel<dim, spacedim, num>::check_material_id(int id) {
   }
 }
 
-template <int dim, int spacedim, bool num> void TopLevel<dim, spacedim, num>::make_grid() {
-  // The distincion of cases is only necessary because the filename is hardcoded
-  // [ ] TODO Remove later
+template <int dim, int spacedim, bool num>
+void TopLevel<dim, spacedim, num>::make_grid() {
+
   std::ifstream input_file(mesh_filename);
   if (!input_file.is_open()) {
     cexc::file_read_error exc;
     BOOST_THROW_EXCEPTION(exc);
   }
-  if (dim == 2) {
-    // Object that reads the input mesh file
-    GridIn<dim> grid_in;
-    // link the input reader to the triangulation
-    grid_in.attach_triangulation(triangulation);
-    // exception catch necessary to allow for zero volume elements
-    try {
-      grid_in.read_msh(input_file);
-    } catch (std::exception &exc) {
-      // ignore
-      std::cerr << boost::diagnostic_information(exc) << std::endl;
-    }
-  } else if (dim == 3) {
-    GridIn<dim> grid_in;
-    grid_in.attach_triangulation(triangulation);
-    // exception catch necessary to allow for zero volume elements
-    try {
-      grid_in.read_msh(input_file);
-    } catch (std::exception &exc) {
-      // ignore
-      std::cerr << boost::diagnostic_information(exc) << std::endl;
-    }
-
+  // Object that reads the input mesh file
+  GridIn<dim> grid_in;
+  // link the input reader to the triangulation
+  grid_in.attach_triangulation(triangulation);
+  // exception catch necessary to allow for zero volume elements
+  try {
+    grid_in.read_msh(input_file);
+  } catch (std::exception &exc) {
+    // ignore
+    // std::cerr << boost::diagnostic_information(exc) << std::endl;
   }
+
+  // Read which material ids correspond to bulk and interface
   input_file.close();
   input_file.open(mesh_filename);
   if (!input_file.is_open()) {
     cexc::file_read_error exc;
     BOOST_THROW_EXCEPTION(exc);
   }
-  bool stop=false;
+  bool stop = false;
   std::string line;
   while (input_file.good() && !stop) {
-    std::getline(input_file,line);
-    if (line.find("$PhysicalNames")!=std::string::npos) {
+    std::getline(input_file, line);
+    if (line.find("$PhysicalNames") != std::string::npos) {
       while (input_file.good() && !stop) {
-        std::getline(input_file,line);
-        if (line.find("$EndPhysicalNames")!=std::string::npos) {
+        std::getline(input_file, line);
+        if (line.find("$EndPhysicalNames") != std::string::npos) {
           stop = true;
           break;
         }
-        if (line.length() ==1) {
+        if (line.length() == 1) {
           // n_physical_names = int(line);
         } else {
           int ignore, tag;
           std::string name;
           std::istringstream iss(line);
           iss >> ignore >> tag >> name;
-          if (name.find("interface")!=std::string::npos) {
+          if (name.find("interface") != std::string::npos) {
             interface_ids.push_back(tag);
-          } else if (name.find("bulk")!=std::string::npos) {
+          } else if (name.find("bulk") != std::string::npos) {
             bulk_ids.push_back(tag);
           }
         }
@@ -459,7 +490,7 @@ template <int dim, int spacedim, bool num> void TopLevel<dim, spacedim, num>::ma
   setup_quadrature_point_history();
 
   // This section names the different sides of the mesh, so that we
-  // can assign different boundary condidions
+  // can assign different boundary conditions
   for (typename Triangulation<dim, spacedim>::active_cell_iterator cell =
            triangulation.begin_active();
        cell != triangulation.end(); ++cell) {
@@ -470,7 +501,7 @@ template <int dim, int spacedim, bool num> void TopLevel<dim, spacedim, num>::ma
         if (dim == 2) {
           if (std::abs(face_center[1] - (-1)) < 1e-8)
             cell->face(f)->set_boundary_id(1);
-          else if (std::abs(face_center[1] - 3) < 1e-8)
+          else if (std::abs(face_center[1] - 1) < 1e-8)
             cell->face(f)->set_boundary_id(2);
           else if (std::abs(face_center[0] - (-1)) < 1e-8)
             cell->face(f)->set_boundary_id(3);
@@ -479,14 +510,16 @@ template <int dim, int spacedim, bool num> void TopLevel<dim, spacedim, num>::ma
           else
             cell->face(f)->set_boundary_id(0);
         } else if (dim == 3) {
-          if (face_center[1] == -1)
+          if (std::abs(face_center[1] - (-1)) < 1e-4)
             cell->face(f)->set_boundary_id(1);
-          else if (face_center[1] == 3)
+          else if (std::abs(face_center[1] - 1) < 1e-4)
             cell->face(f)->set_boundary_id(2);
-          else if (face_center[0] == -1)
+          else if (std::abs(face_center[0] - (-1)) < 1e-4)
             cell->face(f)->set_boundary_id(3);
-          else if (face_center[2] == -1)
+          else if (std::abs(face_center[2] - (-1)) < 1e-4)
             cell->face(f)->set_boundary_id(4);
+          else if (std::abs(face_center[0] - 1) < 1e-4)
+            cell->face(f)->set_boundary_id(5);
           else
             cell->face(f)->set_boundary_id(0);
         }
@@ -499,7 +532,8 @@ template <int dim, int spacedim, bool num> void TopLevel<dim, spacedim, num>::ma
   grid_out.write_msh(triangulation, out);
 }
 
-template <int dim, int spacedim, bool num> void TopLevel<dim, spacedim, num>::setup_system() {
+template <int dim, int spacedim, bool num>
+void TopLevel<dim, spacedim, num>::setup_system() {
   // distribute degrees of freedom over the mesh
   // dof_handler assumes that all elements are of type fe_bulk, with higher
   // polynomial degrees this leads to redundant dofs in the interface elements
@@ -525,10 +559,11 @@ void TopLevel<dim, spacedim, num>::create_constraints() {
 
   // create the component_masks, which describe in which spatial direction a
   // BC is applied
-  std::vector<bool> xmask, ymask, zmask;
+  std::vector<bool> xmask, ymask, zmask, xymask;
   if (dim == 2) {
     ymask = std::vector<bool>{false, true},
     xmask = std::vector<bool>{true, false};
+    xymask = std::vector<bool>{true, true};
   } else if (dim == 3) {
     xmask = std::vector<bool>{true, false, false},
     ymask = std::vector<bool>{false, true, false},
@@ -541,6 +576,9 @@ void TopLevel<dim, spacedim, num>::create_constraints() {
   VectorTools::interpolate_boundary_values(dof_handler, 1,
                                            Functions::ZeroFunction<dim>(dim),
                                            constraints, ComponentMask(ymask));
+  VectorTools::interpolate_boundary_values(dof_handler, 3,
+                                           Functions::ZeroFunction<dim>(dim),
+                                           constraints, ComponentMask(xmask));
   // Apply BC's to face 2 (displacement on the upper end)
   VectorTools::interpolate_boundary_values(
       dof_handler, 2,
@@ -548,14 +586,18 @@ void TopLevel<dim, spacedim, num>::create_constraints() {
                           total_displacement),
       constraints, ComponentMask(ymask));
 
-  // Apply BC's to face 3 (clamp the left hand side in horizontal direction)
-  VectorTools::interpolate_boundary_values(dof_handler, 3,
-                                           Functions::ZeroFunction<dim>(dim),
-                                           constraints, ComponentMask(xmask));
-
+  // Activate for Biaxial stress
   // VectorTools::interpolate_boundary_values(dof_handler, 5,
+  //     BoundaryValues<dim>(time.get_timestep(), time.get_no_timesteps(),
+  //                         total_displacement),
+  //                                          constraints,
+  //                                          ComponentMask(xmask));
+
+  // Apply BC's to face 3 (clamp the left hand side in horizontal direction)
+  // VectorTools::interpolate_boundary_values(dof_handler, 3,
   //                                          Functions::ZeroFunction<dim>(dim),
-  //                                          constraints, ComponentMask(xmask));
+  //                                          constraints,
+  //                                          ComponentMask(ymask));
 
   if (dim == 3) {
     VectorTools::interpolate_boundary_values(dof_handler, 4,
@@ -599,27 +641,32 @@ void TopLevel<dim, spacedim, num>::assemble_system() {
       cell_contrib =
           bulk.calc_cell_contrib(fe_bulk, cell, quadrature_formula_bulk, Ue);
     } else if (check_material_id(cell->material_id()) == 2) {
+      auto quad_backup_1 = quadrature_point_history;
       cell_contrib =
-          inter.calc_cell_contrib(fe_inter, cell, quadrature_formula_inter, Ue
-        );
+          inter.calc_cell_contrib(fe_inter, cell, quadrature_formula_inter, Ue,
+                                  quadrature_point_history);
+      auto quad_backup_2 = quadrature_point_history;
       if (num) {
         auto Ubackup = Ue;
         Vector<double> cell_rhs_pert(dofs_per_cell);
-        // std::vector<Vector<double>(dofs_per_cell)> cell_rhs_pert;
-        std::tie(cell_matrix, cell_rhs) = cell_contrib;
-        for (unsigned int _i = 0; _i!=dofs_per_cell; ++_i) {
-          Ue[_i] += std::max(pertubation_tangent,pertubation_tangent*Ue[_i]);
+        FullMatrix<double> cell_matrix_ana(dofs_per_cell, dofs_per_cell);
+        std::tie(cell_matrix_ana, cell_rhs) = cell_contrib;
+        for (unsigned int _i = 0; _i != dofs_per_cell; ++_i) {
+          quadrature_point_history = quad_backup_1;
+          Ue[_i] += std::max(pertubation_tangent, pertubation_tangent * Ue[_i]);
           cell_contrib =
-              inter.calc_cell_contrib(fe_inter, cell, quadrature_formula_inter, Ue
-                                      );
+              inter.calc_cell_contrib(fe_inter, cell, quadrature_formula_inter,
+                                      Ue, quadrature_point_history);
           std::tie(std::ignore, cell_rhs_pert) = cell_contrib;
-          for (unsigned int _j = 0; _j!=dofs_per_cell; ++_j) {
-            cell_matrix(_j,_i) = (cell_rhs_pert[_j] - cell_rhs[_j])/std::max(pertubation_tangent,pertubation_tangent*Ue[_i]);
+          for (unsigned int _j = 0; _j != dofs_per_cell; ++_j) {
+            cell_matrix(_j, _i) =
+                (cell_rhs_pert[_j] - cell_rhs[_j]) /
+                std::max(pertubation_tangent, pertubation_tangent * Ue[_i]);
           }
           Ue = Ubackup;
-          // cell_matrix = cell_matrix_ana;
+          quadrature_point_history = quad_backup_2;
         }
-        cell_contrib = std::make_tuple(cell_matrix,cell_rhs);
+        cell_contrib = std::make_tuple(cell_matrix, cell_rhs);
       }
     } else {
       cexc::not_mat_error exc;
@@ -641,7 +688,8 @@ void TopLevel<dim, spacedim, num>::assemble_system() {
   }
 }
 
-template <int dim, int spacedim, bool num> void TopLevel<dim, spacedim, num>::solve() {
+template <int dim, int spacedim, bool num>
+void TopLevel<dim, spacedim, num>::solve(unsigned int iter) {
   // damping_parameter = 1;
   // Create the Linear Solver
   // Use a direct sparse matrix solver
@@ -652,10 +700,12 @@ template <int dim, int spacedim, bool num> void TopLevel<dim, spacedim, num>::so
   solver.initialize(system_matrix);
   // Solve the linear system of equations
   solver.vmult(solution_update, residual);
+  if (iter == 0)
+    constraints.distribute(solution_update);
+  else
+    constraints.set_zero(solution_update);
   // perform newton update
-  solution.add(-damping_parameter,solution_update);
-  // Distribute boundary constraints to displacement field
-  constraints.distribute(solution);
+  solution.add(damping_parameter, solution_update);
 }
 
 template <int dim, int spacedim, bool num>
@@ -681,6 +731,15 @@ void TopLevel<dim, spacedim, num>::output_results() {
   // Output is either 2D or 3D vectors
   data_out.add_data_vector(dof_handler, solution, "DSPL", component_type);
   data_out.add_data_vector(dof_handler, system_rhs, "RHS", component_type);
+  Vector<double> mat_id(triangulation.n_active_cells());
+  // create vector of material ids per cell
+  int iter = 0;
+  for (auto cell : dof_handler.active_cell_iterators()) {
+    mat_id[iter] = cell->material_id();
+    ++iter;
+  }
+  data_out.add_data_vector(mat_id, "Material_ID", DataOut<dim>::type_cell_data,
+                           {DataComponentInterpretation::component_is_scalar});
   // build the output
   data_out.build_patches();
 
@@ -719,7 +778,6 @@ void TopLevel<dim, spacedim, num>::setup_quadrature_point_history() {
   }
   std::vector<PointHistory<dim>> tmp;
   tmp.swap(quadrature_point_history);
-
   quadrature_point_history.resize(size);
 
   // Link quadrature_point_history vector to quadrature points
@@ -775,6 +833,13 @@ void TopLevel<dim, spacedim, num>::update_quadrature_point_history() {
       }
     } else if (check_material_id(cell->material_id()) == 2) {
       for (unsigned int q = 0; q < quadrature_formula_inter.size(); ++q) {
+        if (local_quadrature_points_history[q].inter.pen) {
+          // local_quadrature_points_history[q].inter.alpha *= 2;
+          local_quadrature_points_history[q].inter.pen = false;
+        } else {
+          local_quadrature_points_history[q].inter.alpha =
+              local_quadrature_points_history[q].inter.alpha0;
+        }
       }
     } else {
       cexc::not_imp_error exc;
@@ -785,15 +850,20 @@ void TopLevel<dim, spacedim, num>::update_quadrature_point_history() {
 
 template <int dim, int spacedim, bool num>
 void TopLevel<dim, spacedim, num>::do_initial_timestep() {
+  Timer t;
   std::cout << "doing initial timestep" << std::endl;
   make_grid();
   std::cout << "grid made" << std::endl;
   setup_system();
-  std::cout << "initial step completed" << std::endl;
+  std::cout << "initial step completed in " << t.elapsed() << " seconds "
+            << std::endl;
   output_results();
 }
 
-template <int dim, int spacedim, bool num> void TopLevel<dim, spacedim, num>::do_timestep() {
+template <int dim, int spacedim, bool num>
+void TopLevel<dim, spacedim, num>::do_timestep() {
+  Timer t_outer, t_inner;
+
   // increase the time
   time.increment();
   std::cout << "Timestep No. " << time.get_timestep() << " time "
@@ -801,59 +871,78 @@ template <int dim, int spacedim, bool num> void TopLevel<dim, spacedim, num>::do
   // initialise norm of residual vector to one, so the loop is entered
   double rsn = 1.;
   double rsn_old = rsn;
+  double step_length = 1e8;
+  double old_step_length;
   unsigned int iter = 0;
   damping_parameter = 1;
   // create constraints
   create_constraints();
+  DynamicSparsityPattern dsp(dof_handler.n_dofs(), dof_handler.n_dofs());
+  DoFTools::make_sparsity_pattern(dof_handler, dsp);
+  constraints.condense(dsp);
+  sparsity_pattern.copy_from(dsp);
   // Newton-Raphson loop
   auto res = residual;
-  while (rsn > 1e-8) {
+  std::cout << "  Entering Newton Raphson Solver" << std::endl;
+  while (rsn > tol_newton) {
 
-    if (iter > 1) {
-      if (rsn - rsn_old > rsn_old*1e-2) {
-        damping_parameter /= 2;
-      } else {
-        damping_parameter = 1;
-      }
-    }
-    rsn_old = rsn;
+    // if (iter > 1) {
+    //   old_step_length = step_length;
+    //   step_length = solution_update.l2_norm();
+    //   if (step_length > old_step_length) {
+    //     damping_parameter /= 2;
+    //   } else {
+    //     damping_parameter = 1;
+    //   }
+    // }
+    t_inner.reset();
 
     // Assemble the system of equations
     assemble_system();
-    // Calculate the residual vector
-    constraints.condense(system_matrix, system_rhs);
-    // constraints.distribute(solution);
-    system_matrix.vmult(residual, solution);
-    residual.add(-1, system_rhs);
-    res = residual;
-    constraints.set_zero(res);
+    residual = system_rhs;
+    // std::cout << "    System assembled in " << t_inner.elapsed() << "
+    // seconds" << std::endl;
+    t_inner.reset();
+    if (iter == 0) {
+      constraints.condense(system_matrix, residual);
+    } else {
+      constraints.condense(system_matrix);
+      constraints.set_zero(residual);
+    }
 
-    rsn = res.l2_norm();
-    std::cout << "  iter = " << iter << ",  residual = " << rsn << std::endl;
+    rsn = residual.l2_norm();
+    std::cout << "    Iteration = " << iter << ",  current residual = " << rsn
+              << std::endl;
     if (rsn > tol_newton) {
-      solve();
+      t_inner.reset();
+      solve(iter);
+      // std::cout << "    Linear System solved in " << t_inner.elapsed() << "
+      // seconds" << std::endl;
       iter++;
     }
     if (iter > max_iter_newton) {
       cexc::convergence_error exc;
       BOOST_THROW_EXCEPTION(exc);
     }
+    std::cout << "    Newton Raphson Iteration Completed, Elapsed Time = "
+              << t_outer.elapsed() << std::endl;
   }
-  std::cout << "Step completed" << std::endl;
+  std::cout << "Step completed in " << t_outer.elapsed() << " seconds"
+            << std::endl;
   update_quadrature_point_history();
   output_results();
 }
 
-template <int dim, int spacedim, bool num> void TopLevel<dim, spacedim, num>::run() {
+template <int dim, int spacedim, bool num>
+void TopLevel<dim, spacedim, num>::run() {
   do_initial_timestep();
 
-  while (time.get_current() < time.get_end()) {
+  while (time.get_current() + 1e-8 < time.get_end()) {
     do_timestep();
   }
   //  output_results();
-  std::cout << "output results" << std::endl;
+  // std::cout << "output results" << std::endl;
 }
-
 // FE Functions End ----------------------------------------------------
 
 } // namespace fem
