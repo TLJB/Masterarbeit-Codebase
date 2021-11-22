@@ -1,3 +1,23 @@
+"""
+
+ @file interface_creator
+
+ @brief Add interface elements to gmsh mesh
+
+ @author Till Budde (tilljanis.budde@tu-dortmund.de)
+
+ call script with -i {inputfilename} -o {outputfilename}
+ Inputfile must have 'interface', 'bulk_1' and 'bulk_2' as PhysicalNames Which
+ volume is 1 or 2 depends on the normal vector (it must point towards 2) When
+ using a new mesh setting the size of the pertubation of the upper side of the
+ interface to 1e-2 or 1e-3 might help in visualizing the interface.
+ When creating the mesh make sure the normal vector of the interface always
+ points in the same direction (orientation of curves that make up the interface
+ must be constant)
+
+"""
+
+
 import sys
 import re
 import os
@@ -8,6 +28,8 @@ import math
 
 
 class Node:
+    """Class that represents a Node"""
+
     def __init__(
         self,
         id: int = 0,
@@ -22,6 +44,11 @@ class Node:
 
 
 class Element:
+    """Class that represents an element
+
+    contains an id, a type, tags and the element nodes
+    """
+
     def __init__(self):
         id = -1
         type = -1
@@ -30,6 +57,8 @@ class Element:
 
 
 class Connectivity:
+    """Class that represents the connectivity list"""
+
     def __init__(self, elements: int = -1):
         self.n_elem = elements
         self.n_inter = -1
@@ -45,7 +74,14 @@ class PhysicalName:
 
 
 def check_format(fobj: TextIO) -> bool:
-    # move forward until section $MeshFormat
+    """Check the file format of the .msh file
+
+    Args:
+        fobj (TextIO): the file object that opens the .msh file
+
+    Returns:
+        bool: True if Format is of Version 2.2, False if not
+    """
 
     Section = "MeshFormat"
     BeginSection = "$" + Section
@@ -69,6 +105,15 @@ def check_format(fobj: TextIO) -> bool:
 
 
 def read_physical_names(fobj: TextIO) -> list[PhysicalName]:
+    """Read the Physical Names of the mesh
+
+    Args:
+        fobj (TextIO): File Object that opens the .msh file
+
+    Returns:
+        list[PhysicalName]: List of PhysicalNames, associates ids an clear names
+        of the PhysicalGroups
+    """
     Section = "PhysicalNames"
     BeginSection = "$" + Section
     EndSection = "$End" + Section
@@ -98,6 +143,14 @@ def read_physical_names(fobj: TextIO) -> list[PhysicalName]:
 
 
 def read_nodes(fobj: TextIO) -> list[Node]:
+    """Read nodes of the msh
+
+    Args:
+        fobj (TextIO): File Object that opens the .msh file
+
+    Returns:
+        list[Node]: List of nodes
+    """
 
     Section = "Nodes"
     BeginSection = "$" + Section
@@ -129,6 +182,15 @@ def read_nodes(fobj: TextIO) -> list[Node]:
 
 
 def read_elements(fobj: TextIO, names: list[PhysicalName]) -> list[Element]:
+    """Read the connectivity list
+
+    Args:
+        fobj (TextIO): File Object that opens the .msh file
+        names (list[PhysicalName]): List of Names
+
+    Returns:
+        list[Element]: List of elements (the connectivity list)
+    """
 
     n_inter_elem = -1
 
@@ -165,10 +227,22 @@ def read_elements(fobj: TextIO, names: list[PhysicalName]) -> list[Element]:
             ]
             iter += 1
 
-    return elements
+    return element
 
 
 def volume(nodal_values: np.ndarray) -> float:
+    """Calculate the Volume (or area) of an element
+
+    Args:
+        nodal_values (np.ndarray): coordinates of nodes as numpy array
+
+    Raises:
+        NotImplementedError: if nodal_values does not represent a quadrilateral
+        or hexaeder
+
+    Returns:
+        float: the volume (or area)
+    """
     if nodal_values.shape[0] == 4:
         # 2d quadrilateral
         V = 0
@@ -286,6 +360,20 @@ def volume(nodal_values: np.ndarray) -> float:
 def invert_negative_volumes(
     nodes: list, elements: list, names: list
 ) -> [bool, list]:
+    """Invert cells with negative volume (cell numbering not correct)
+
+    Args:
+        nodes (list): List of all nodes
+        elements (list): Connectivity list
+        names (list): List of PhysicalNames
+
+    Raises:
+        RuntimeError: if an element could not be inverted to have a positive
+        volume
+
+    Returns:
+        [bool, list]: boolean whether cells were inverted, Connectivity List
+    """
 
     cell_invert = False
     for index, elem in enumerate(elements):
@@ -336,6 +424,17 @@ def invert_negative_volumes(
 def add_interface_elements(
     nodes: list[Node], elements: list[Element], names: list[PhysicalName]
 ) -> [list[Node], list[Element]]:
+    """Add interface elements to mesh
+
+    Args:
+        nodes (list[Node]): List of Nodes
+        elements (list[Element]): Connectivity List
+        names (list[PhysicalName]): List of PhysicalNames
+
+    Returns:
+        [list[Node], list[Element]]: List of Nodes and Connectivity List
+    """
+
     class Duplicates:
         def __init__(self):
             self.first = []
@@ -434,13 +533,13 @@ def add_interface_elements(
                 ]:
                     nodes[
                         duplicates.second[duplicates.first.index(node)] - 1
-                    ].x_coord += (normal_vector[0] * 1e-12)*(1)
+                    ].x_coord += (normal_vector[0] * 1e-12) * (1)
                     nodes[
                         duplicates.second[duplicates.first.index(node)] - 1
-                    ].y_coord += (normal_vector[1] * 1e-12)*(1)
+                    ].y_coord += (normal_vector[1] * 1e-12) * (1)
                     nodes[
                         duplicates.second[duplicates.first.index(node)] - 1
-                    ].z_coord += (normal_vector[2] * 1e-12)*(1)
+                    ].z_coord += (normal_vector[2] * 1e-12) * (1)
                     node_is_offset[
                         duplicates.second[duplicates.first.index(node)] - 1
                     ] = True
@@ -475,6 +574,20 @@ def add_interface_elements(
 def invert_interfaces(
     nodes: list[Node], elements: list[Element], names: list[PhysicalName]
 ) -> list:
+    """Invert interfaces
+
+    Args:
+        nodes (list[Node]): List of Nodes
+        elements (list[Element]): Connectivity List
+        names (list[PhysicalName]): List of PhysicalNames
+
+    Raises:
+        RuntimeError: if an element could not be inverted to have a positive
+        volume
+
+    Returns:
+        list: connectivity List
+    """
     for index, elem in enumerate(elements):
         if not set(elem.tags).isdisjoint(
             [phys.tag for phys in names if "interface" in phys.name]
@@ -522,7 +635,16 @@ def write_mesh(
     nodes: list[Node],
     elements: list[Element],
     names: list[PhysicalName],
-) -> bool:
+):
+    """Write Mesh to File
+
+    Args:
+        fobj (TextIO): File object of the output file
+        nodes (list[Node]): List of Nodes
+        elements (list[Element]): Connectivity List
+        names (list[PhysicalName]): List of PhysicalNames
+
+    """
     # write mesh info
     fobj.write("$MeshFormat\n2.2 0 8\n$EndMeshFormat\n")
     # write physical names
@@ -557,7 +679,15 @@ def write_mesh(
 
 
 def main(argv):
+    """Add interface elements to a gmsh mesh
 
+    Args:
+        argv ([type]): Command line Parameters [-i,-o]
+
+    Raises:
+        OSError: If Input file not found
+        SyntaxError: If Input file format not of Version 2.2
+    """
     try:
         opts, args = getopt.getopt(argv, "hi:o:", ["ifile=", "ofile="])
     except getopt.GetoptError:
