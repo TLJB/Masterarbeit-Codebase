@@ -97,7 +97,7 @@ void BoundaryValues<dim>::vector_value(const Point<dim> & /*p*/,
   // set all values and extract using mask when filling affineconstraint object
   if (dim > 1) {
     for (auto _v=values.begin(); _v!=values.end(); ++_v) {
-      *_v = current_displacement;
+      *_v = displacement_step;
     }
   } else {
     cexc::exception_base exc;
