@@ -23,7 +23,7 @@ public:
    * @brief Construct a new Time object
    *
    */
-  Time() : timestep(0), time_current(0.0), time_end(1.), dt(.25) {
+  Time() : timestep(0), time_current(0.0), time_end(1.), dt(.1) {
     double tmp = time_end / dt;
     no_timesteps = (unsigned int)tmp;
   }
