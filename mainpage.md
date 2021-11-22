@@ -29,8 +29,9 @@ material models could be implemented.
 
 ## Goals of this work
 
-- [ ] Implementation of a FEM Code suited to the usage of interface elements
-- [ ] Implementation of a library of interface elements with different material models
+- [X] Implementation of a FEM Code suited to the usage of interface elements
+- [X] Implementation of a library of interface elements with different material models
   - [X] Spring like interface
   - [X] Damaged Fiber Model interface 
   - [ ] Elastoplastic fiber model
+  - [X] Generalised Interface Element

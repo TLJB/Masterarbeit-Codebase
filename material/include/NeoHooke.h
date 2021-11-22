@@ -1,7 +1,7 @@
 /**
  * @file small-strain.h
  * @author Till Budde (tilljanis.budde@tu-dortmund.de)
- * @brief Implements small strain elasticity + linear hardening
+ * @brief Implements a NeoHooke bulk material
  * @version 0.1
  * @date 2021-06-28
  *
@@ -19,7 +19,7 @@
 #include <tuple>
 
 /**
- * @brief Namespace for small-strain elasticity
+ * @brief Namespace for NeoHooke material
  *
  */
 namespace NeoHooke {
@@ -28,7 +28,7 @@ using namespace dealii;
 using namespace fem;
 
 /**
- * @brief Small Strain Linear Elasticity
+ * @brief NeoHooke material
  *
  * @tparam dim number of dimensions
  * @tparam spacedim number of spatial dimensions
@@ -38,7 +38,6 @@ public:
   /**
    * @brief Construct a new Material object
    *
-   * Initialise the 4th order stress-strain tensor
    *
    */
   Material();
