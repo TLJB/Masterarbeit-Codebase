@@ -14,6 +14,7 @@
  */
 #include<iostream>
 #include"toplevel.h"
+#include "timer.h"
 #include<boost/exception/diagnostic_information.hpp>
 
 /**
@@ -28,9 +29,11 @@ int main()
 	try 
 	{
 		// the template parameter decide wether the calculation is 2D or 3D
-		TopLevel<2,2> fem;
+		// and wether a numerical cell_tangent is calculated (only interface)
+		Timer t;
+		TopLevel<2,2, true> fem;
 		fem.run();
-		std::cout << "test run" << std::endl;
+		std::cout << "Programm completed in " << t.elapsed() << "seconds" << std::endl;
 	}
 	catch (std::exception &exc)
 	{
