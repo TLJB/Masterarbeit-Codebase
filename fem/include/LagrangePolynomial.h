@@ -73,6 +73,12 @@ public:
    * @param q The number of quadrature points
    */
   LagrangePolynomial(int q) : quadrature(q) { init(1); };
+  /**
+   * @brief Construct a new Lagrange Polynomial object
+   * 
+   * @param q the number of quadrature points
+   * @param p the degree of the lagrange polynomial
+   */
   LagrangePolynomial(int q, int p) : quadrature(q) { init(p); };
   /**
    * @brief Destroy the Lagrange Polynomial object
