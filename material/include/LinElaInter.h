@@ -68,7 +68,8 @@ public:
   std::tuple<FullMatrix<double>, Vector<double>> calc_cell_contrib(
       FESystem<dim, spacedim> &fe,
       typename DoFHandler<dim, spacedim>::active_cell_iterator &cell,
-      QGauss<dim - 1> quadrature_formula, Vector<double> Ue);
+      QGauss<dim - 1> quadrature_formula, Vector<double> Ue,
+      std::vector<PointHistory<dim>> &quadrature_point_history);
 
   /**
    * @brief Calculate the stress Tensor
@@ -87,7 +88,8 @@ std::tuple<FullMatrix<double>, Vector<double>>
 Material<dim, spacedim>::calc_cell_contrib(
     FESystem<dim, spacedim> &fe,
     typename DoFHandler<dim, spacedim>::active_cell_iterator &cell,
-    QGauss<dim - 1> quadrature_formula, Vector<double> Ue) {
+    QGauss<dim - 1> quadrature_formula, Vector<double> Ue,
+    std::vector<PointHistory<dim>> &quadrature_point_history) {
   // the constructor of feface_values needs fe & quadrature_formula,
   // the other arguments determine which values are calculated by
   // fe_values(reinit)
@@ -96,6 +98,7 @@ Material<dim, spacedim>::calc_cell_contrib(
   // [ ] TODO ^
   FEFaceValues<dim, spacedim> fe_values(fe, quadrature_formula,
                                         update_values | update_JxW_values |
+                                            update_normal_vectors |
                                             update_quadrature_points);
   // get the number of dofs and quadrature points
   const unsigned int n_q_points = quadrature_formula.size();
@@ -125,12 +128,26 @@ Material<dim, spacedim>::calc_cell_contrib(
   // allocate memory for the jump and traction
   Tensor<1, dim, double> jump;
   Tensor<1, dim, double> traction;
+  Tensor<1, dim, double> normal_vector;
+  double wn;
+  double alpha;
+
+  // get the local_quadrature_points_history of each cell
+  PointHistory<dim> *local_quadrature_points_history =
+      reinterpret_cast<PointHistory<dim> *>(cell->user_pointer());
+  Assert(local_quadrature_points_history >= &quadrature_point_history.front(),
+         ExcInternalError());
+  Assert(local_quadrature_points_history < &quadrature_point_history.back(),
+         ExcInternalError());
 
   // loop over quadrature points
   for (unsigned int q_point = 0; q_point != n_q_points; ++q_point) {
 
     // reset jump to zero
     jump = 0;
+    normal_vector = 0;
+    wn = 0;
+    alpha = local_quadrature_points_history[q_point].inter.alpha;
 
     /**
      * It should be noted, that in general the FeFaceValues class loops over
@@ -175,9 +192,14 @@ Material<dim, spacedim>::calc_cell_contrib(
                     face_dof, face, cell->face_orientation(face), false, false),
                 q_point) *
             ((face == n_faces - 2) ? -1 : 1);
-      }
-    }
-
+      } // end loop face dofs
+      normal_vector +=
+          fe_values.normal_vector(q_point) * ((face == n_faces - 2) ? -1 : 1);
+    } // end loop faces
+    normal_vector /= normal_vector.norm();
+    wn = scalar_product(jump, normal_vector);
+    if (wn < 0)
+      local_quadrature_points_history[q_point].inter.pen = true;
     // calculate traction
     traction = C * jump;
 
@@ -209,13 +231,16 @@ Material<dim, spacedim>::calc_cell_contrib(
                             node_i * fe.n_components() + component_i;
 
         // calculate the internal force fector
-        auto fint_i = fe_values.shape_value(
-                          fe.face_to_cell_index(face_dof_i, face_i,
-                                                cell->face_orientation(face_i),
-                                                false, false),
-                          q_point) *
-                      traction[component_i] * fe_values.JxW(q_point) *
-                      ((face_i == n_faces - 2) ? -1 : +1);
+        auto fint_i =
+            (fe_values.shape_value(
+                 fe.face_to_cell_index(face_dof_i, face_i,
+                                       cell->face_orientation(face_i), false,
+                                       false),
+                 q_point) *
+             ((face_i == n_faces - 2) ? -1 : +1) *
+             (traction[component_i] +
+              alpha * normal_vector[component_i] * ((wn < 0) ? -wn * wn : 0))) *
+            fe_values.JxW(q_point);
 
         // add contributions to cell_rhs
         cell_rhs(vector_index) += fint_i;
@@ -245,11 +270,15 @@ Material<dim, spacedim>::calc_cell_contrib(
                 q_point);
 
             // add contribution to stiffness matrix
-            // std::cout << "C[" << component_i << "][" << component_j 
+            // std::cout << "C[" << component_i << "][" << component_j
             // << "] = " << C[component_i][component_j] << std::endl;
             cell_matrix(index_i, index_j) +=
-                N_i * C[component_i][component_j] * N_j *
-                fe_values.JxW(q_point) * ((face_i == n_faces - 2) ? -1 : 1) *
+                N_i *
+                (C[component_i][component_j] +
+                 2 * alpha * normal_vector[component_i] * (wn < 0 ? wn : 0) *
+                     normal_vector[component_j]) *
+                N_j * fe_values.JxW(q_point) *
+                ((face_i == n_faces - 2) ? -1 : 1) *
                 ((face_j == n_faces - 2) ? -1 : 1);
 
             // std::cout << "Ke = " <<  std::endl;
